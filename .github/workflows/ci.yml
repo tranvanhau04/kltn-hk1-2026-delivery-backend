@@ -1,0 +1,43 @@
+name: Node.js CI Pipeline
+
+on:
+  push:
+    branches: [ "develop", "main" ]
+  pull_request:
+    branches: [ "develop", "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Checkout mã nguồn
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    # 2. Cài đặt môi trường Node.js
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    # 3. Cài đặt các thư viện
+    - name: Install Dependencies
+      run: npm ci
+
+    # 4. Quét lỗi cú pháp bằng ESLint
+    - name: Run Linter
+      run: npm run lint
+
+    # 5. Chạy Test tự động (Unit Test)
+    - name: Run Unit Tests
+      run: npm run test
+
+    # 6. (Tùy chọn) Chạy Test kiểm thử tích hợp (e2e) với NestJS
+    - name: Run e2e Tests
+      run: npm run test:e2e
+
+    # 7. Build dự án để kiểm tra lỗi TypeScript
+    - name: Build Project
+      run: npm run build
