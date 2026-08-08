@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  # Cấu hình cho MySQL Database trong Docker
+  mysql-db:
+    image: mysql:8.0
+    container_name: delivery_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: sapassword
+      MYSQL_DATABASE: delivery_db
+    ports:
+      - "3308:3306" # Đã đổi sang cổng 3308 cực kỳ an toàn
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  # Cấu hình cho phpMyAdmin 
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: delivery_phpmyadmin
+    restart: always
+    environment:
+      PMA_HOST: mysql-db
+      MYSQL_ROOT_PASSWORD: sapassword
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql-db
+
+volumes:
+  mysql_data:
