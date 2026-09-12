@@ -4,6 +4,10 @@
 -- Đồng bộ với ERD Diagram & Class Diagram (phiên bản cập nhật)
 -- ============================================================================
 
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+
+
 CREATE DATABASE IF NOT EXISTS `delivery_db`
 CHARACTER SET utf8mb4
 COLLATE utf8mb4_unicode_ci;
