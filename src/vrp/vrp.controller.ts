@@ -58,9 +58,7 @@ export class VrpController {
 
     // Load orders
     const orders = await this.orderRepo.find({
-      where: dto.orderIds?.length
-        ? { id: In(dto.orderIds) }
-        : { status: 'NEW' },
+      where: dto.orderIds?.length ? { id: In(dto.orderIds) } : { status: 'NEW' },
     });
 
     // Load drivers with user info
@@ -70,9 +68,7 @@ export class VrpController {
 
     // Fetch user info to get full names
     const userIds = driversRaw.map((d) => d.userId);
-    const users = userIds.length
-      ? await this.userRepo.find({ where: { id: In(userIds) } })
-      : [];
+    const users = userIds.length ? await this.userRepo.find({ where: { id: In(userIds) } }) : [];
     const userMap = new Map(users.map((u) => [u.id, u]));
 
     const drivers = driversRaw

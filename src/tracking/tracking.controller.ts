@@ -24,7 +24,7 @@ export class TrackingController {
     @InjectRepository(Route) private readonly routeRepo: Repository<Route>,
     @InjectRepository(Stop) private readonly stopRepo: Repository<Stop>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
-  ) { }
+  ) {}
 
   /**
    * GET /api/tracking/live
@@ -68,14 +68,15 @@ export class TrackingController {
 
         // Determine real GPS position — NEVER use Math.random() or generated coordinates.
         // Only use actual values from the tracking_logs table.
-        const hasRealGps = latestLog &&
+        const hasRealGps =
+          latestLog &&
           latestLog.latitude != null &&
           latestLog.longitude != null &&
           Number(latestLog.latitude) !== 0 &&
           Number(latestLog.longitude) !== 0;
 
-        const currentLat: number | null = hasRealGps ? Number(latestLog!.latitude) : null;
-        const currentLng: number | null = hasRealGps ? Number(latestLog!.longitude) : null;
+        const currentLat: number | null = hasRealGps ? Number(latestLog.latitude) : null;
+        const currentLng: number | null = hasRealGps ? Number(latestLog.longitude) : null;
         const positionUnknown = !hasRealGps;
 
         return {
@@ -93,12 +94,12 @@ export class TrackingController {
           lastUpdated: latestLog?.timestamp ?? null,
           activeRoute: activeRoute
             ? {
-              routeId: activeRoute.id,
-              totalDistanceKm: Number(activeRoute.totalDistanceKm),
-              totalEstimatedTimeMin: Number(activeRoute.totalEstimatedTimeMin),
-              status: activeRoute.status,
-              polyline,
-            }
+                routeId: activeRoute.id,
+                totalDistanceKm: Number(activeRoute.totalDistanceKm),
+                totalEstimatedTimeMin: Number(activeRoute.totalEstimatedTimeMin),
+                status: activeRoute.status,
+                polyline,
+              }
             : null,
         };
       }),
@@ -145,8 +146,6 @@ export class TrackingController {
         stops: [],
       };
     }
-
-    const today = new Date().toISOString().split('T')[0];
 
     // Get most recent active route for this driver (ignoring date for testing)
     const route = await this.routeRepo.findOne({
@@ -202,16 +201,16 @@ export class TrackingController {
         arrivedAt: s.arrivedAt,
         order: s.order
           ? {
-            id: s.order.id,
-            code: s.order.code,
-            receiverName: s.order.receiverName,
-            receiverPhone: s.order.receiverPhone,
-            deliveryAddress: s.order.deliveryAddress,
-            lat: Number(s.order.latitude),
-            lng: Number(s.order.longitude),
-            codAmount: Number(s.order.codAmount),
-            status: s.order.status,
-          }
+              id: s.order.id,
+              code: s.order.code,
+              receiverName: s.order.receiverName,
+              receiverPhone: s.order.receiverPhone,
+              deliveryAddress: s.order.deliveryAddress,
+              lat: Number(s.order.latitude),
+              lng: Number(s.order.longitude),
+              codAmount: Number(s.order.codAmount),
+              status: s.order.status,
+            }
           : null,
       })),
     };
@@ -222,15 +221,15 @@ export class TrackingController {
    * Ends the driver's shift by setting their status to OFFLINE.
    */
   @Post('driver/:driverId/shift/end')
-  async endDriverShift(@Param('driverId') driverId: string, @Body() body: any) {
+  async endDriverShift(@Param('driverId') driverId: string) {
     const driver = await this.driverRepo.findOne({ where: { userId: driverId } });
     if (!driver) {
       throw new HttpException('Driver not found', HttpStatus.NOT_FOUND);
     }
-    
+
     driver.currentShiftStatus = 'OFFLINE';
     await this.driverRepo.save(driver);
-    
+
     return { success: true };
   }
 
@@ -244,10 +243,10 @@ export class TrackingController {
     if (!driver) {
       throw new HttpException('Driver not found', HttpStatus.NOT_FOUND);
     }
-    
+
     driver.currentShiftStatus = 'ONLINE_READY';
     await this.driverRepo.save(driver);
-    
+
     return { success: true };
   }
 }

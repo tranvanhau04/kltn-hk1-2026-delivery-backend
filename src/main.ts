@@ -13,4 +13,4 @@ async function bootstrap() {
   await app.listen(3001);
   console.log('🚀 Backend running on http://localhost:3001/api');
 }
-bootstrap();
+bootstrap().catch(console.error);

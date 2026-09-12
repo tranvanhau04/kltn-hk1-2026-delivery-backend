@@ -8,13 +8,7 @@ import { VrpModule } from './vrp/vrp.module';
 import { TrackingModule } from './tracking/tracking.module';
 
 @Module({
-  imports: [
-    DatabaseModule,
-    DepotsModule,
-    OrdersModule,
-    VrpModule,
-    TrackingModule,
-  ],
+  imports: [DatabaseModule, DepotsModule, OrdersModule, VrpModule, TrackingModule],
   controllers: [AppController],
   providers: [AppService],
 })
