@@ -276,23 +276,23 @@ TRUNCATE TABLE `drivers`;
 TRUNCATE TABLE `users`;
 
 -- 1. DANH SÁCH TÀI KHOẢN NGƯỜI DÙNG (USERS)
--- Mật khẩu mặc định: '123456' ($2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQmG6W65VU3J5GLIqmi2S)
+-- Mật khẩu mặc định: '123456' ($2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC)
 INSERT INTO `users` (`id`, `full_name`, `email`, `phone`, `password_hash`, `role`, `status`) VALUES
 -- Quản trị viên
-('u0000000-0000-0000-0000-000000000001', 'Nguyễn Quản Trị (Admin)', 'admin@smartexpress.vn', '0901000001', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQmG6W65VU3J5GLIqmi2S', 'ADMIN', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000001', 'Nguyễn Quản Trị (Admin)', 'admin@smartexpress.vn', '0901000001', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'ADMIN', 'ACTIVE'),
 -- Điều phối viên (Dispatchers)
-('u0000000-0000-0000-0000-000000000002', 'Trần Điều Phối 01 (Gò Vấp/Bình Thạnh)', 'dieupoi01@smartexpress.vn', '0901000002', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQmG6W65VU3J5GLIqmi2S', 'DISPATCHER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000003', 'Lê Điều Phối 02 (Trung Tâm Q1/Q3)', 'dieupoi02@smartexpress.vn', '0901000003', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQmG6W65VU3J5GLIqmi2S', 'DISPATCHER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000004', 'Phạm Điều Phối 03 (Thủ Đức/Tân Bình)', 'dieupoi03@smartexpress.vn', '0901000004', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQmG6W65VU3J5GLIqmi2S', 'DISPATCHER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000002', 'Trần Điều Phối 01 (Gò Vấp/Bình Thạnh)', 'dieupoi01@smartexpress.vn', '0901000002', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DISPATCHER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000003', 'Lê Điều Phối 02 (Trung Tâm Q1/Q3)', 'dieupoi02@smartexpress.vn', '0901000003', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DISPATCHER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000004', 'Phạm Điều Phối 03 (Thủ Đức/Tân Bình)', 'dieupoi03@smartexpress.vn', '0901000004', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DISPATCHER', 'ACTIVE'),
 -- Đội ngũ Tài xế (Drivers)
-('u0000000-0000-0000-0000-000000000101', 'Ngô Văn Tài (Xe máy 01)', 'driver01@smartexpress.vn', '0902000101', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQmG6W65VU3J5GLIqmi2S', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000102', 'Phạm Hoàng Nam (Xe máy 02)', 'driver02@smartexpress.vn', '0902000102', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQmG6W65VU3J5GLIqmi2S', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000103', 'Vũ Quốc Bảo (Xe tải Van 500kg)', 'driver03@smartexpress.vn', '0902000103', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQmG6W65VU3J5GLIqmi2S', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000104', 'Đặng Minh Khôi (Xe tải 1 Tấn)', 'driver04@smartexpress.vn', '0902000104', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQmG6W65VU3J5GLIqmi2S', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000105', 'Bùi Anh Tuấn (Xe máy 03)', 'driver05@smartexpress.vn', '0902000105', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQmG6W65VU3J5GLIqmi2S', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000106', 'Đỗ Thành Đạt (Xe máy 04)', 'driver06@smartexpress.vn', '0902000106', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQmG6W65VU3J5GLIqmi2S', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000107', 'Lý Quốc Trọng (Xe tải 1.5 Tấn)', 'driver07@smartexpress.vn', '0902000107', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQmG6W65VU3J5GLIqmi2S', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000108', 'Trương Gia Huy (Xe máy 05)', 'driver08@smartexpress.vn', '0902000108', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQmG6W65VU3J5GLIqmi2S', 'DRIVER', 'ACTIVE');
+('u0000000-0000-0000-0000-000000000101', 'Ngô Văn Tài (Xe máy 01)', 'driver01@smartexpress.vn', '0902000101', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000102', 'Phạm Hoàng Nam (Xe máy 02)', 'driver02@smartexpress.vn', '0902000102', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000103', 'Vũ Quốc Bảo (Xe tải Van 500kg)', 'driver03@smartexpress.vn', '0902000103', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000104', 'Đặng Minh Khôi (Xe tải 1 Tấn)', 'driver04@smartexpress.vn', '0902000104', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000105', 'Bùi Anh Tuấn (Xe máy 03)', 'driver05@smartexpress.vn', '0902000105', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000106', 'Đỗ Thành Đạt (Xe máy 04)', 'driver06@smartexpress.vn', '0902000106', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000107', 'Lý Quốc Trọng (Xe tải 1.5 Tấn)', 'driver07@smartexpress.vn', '0902000107', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000108', 'Trương Gia Huy (Xe máy 05)', 'driver08@smartexpress.vn', '0902000108', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE');
 
 -- 2. HỒ SƠ PHƯƠNG TIỆN TÀI XẾ (DRIVERS)
 INSERT INTO `drivers` (`user_id`, `license_plate`, `vehicle_type`, `max_weight_kg`, `max_volume_m3`, `current_shift_status`) VALUES

@@ -2,6 +2,8 @@ import { Controller, Get, Patch, Param, Body } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { UpdateCoordinatesDto } from './dto/update-coordinates.dto';
 import { Order } from '../entities/order.entity';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../entities/user.entity';
 
 @Controller('orders')
 export class OrdersController {
@@ -9,12 +11,14 @@ export class OrdersController {
 
   /** GET /api/orders — all orders */
   @Get()
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   findAll(): Promise<Order[]> {
     return this.ordersService.findAll();
   }
 
   /** GET /api/orders/pool — unassigned NEW orders for VRP */
   @Get('pool')
+  @Roles(UserRole.ADMIN)
   findPool(): Promise<Order[]> {
     return this.ordersService.findPool();
   }
