@@ -9,6 +9,7 @@ import { TrackingLog } from '../entities/tracking-log.entity';
 import { User } from '../entities/user.entity';
 import { Zone } from '../entities/zone.entity';
 import { ZoneDriver } from '../entities/zone-driver.entity';
+import { PasswordReset } from '../entities/password-reset.entity';
 
 @Module({
   imports: [
@@ -19,10 +20,11 @@ import { ZoneDriver } from '../entities/zone-driver.entity';
       username: 'root',
       password: 'sapassword',
       database: 'delivery_db',
-      entities: [Depot, Order, Driver, Route, Stop, TrackingLog, User, Zone, ZoneDriver],
+      entities: [Depot, Order, Driver, Route, Stop, TrackingLog, User, Zone, ZoneDriver, PasswordReset],
       synchronize: false, // schema already created by init.sql
       logging: false,
       charset: 'utf8mb4_unicode_ci',
+      timezone: 'Z',
       extra: {
         charset: 'utf8mb4_unicode_ci',
       },
