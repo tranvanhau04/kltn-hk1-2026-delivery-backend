@@ -13,16 +13,18 @@ exports.MaxFlowService = void 0;
 const common_1 = require("@nestjs/common");
 let MaxFlowService = class MaxFlowService {
     constructor() { }
-    calculateMaxFlow(source, sink, capacities) {
+    calculateMaxFlow(_source, _sink, _capacities) {
+        console.log(_source, _sink, _capacities);
         return {
             maxFlow: 0,
-            assignments: {}
+            assignments: {},
         };
     }
-    assignOrdersToDrivers(orders, drivers) {
+    assignOrdersToDrivers(_orders, _drivers) {
+        console.log(_orders, _drivers);
         return {
             assigned: [],
-            unassigned: []
+            unassigned: [],
         };
     }
 };

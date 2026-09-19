@@ -6,9 +6,11 @@ import { DepotsModule } from './depots/depots.module';
 import { OrdersModule } from './orders/orders.module';
 import { VrpModule } from './vrp/vrp.module';
 import { TrackingModule } from './tracking/tracking.module';
+import { ZonesModule } from './zones/zones.module';
+import { DriversModule } from './drivers/drivers.module';
 
 @Module({
-  imports: [DatabaseModule, DepotsModule, OrdersModule, VrpModule, TrackingModule],
+  imports: [DatabaseModule, DepotsModule, OrdersModule, VrpModule, TrackingModule, ZonesModule, DriversModule],
   controllers: [AppController],
   providers: [AppService],
 })

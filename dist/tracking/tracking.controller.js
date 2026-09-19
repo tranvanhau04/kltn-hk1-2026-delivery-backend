@@ -116,7 +116,6 @@ let TrackingController = class TrackingController {
                 stops: [],
             };
         }
-        const today = new Date().toISOString().split('T')[0];
         const route = await this.routeRepo.findOne({
             where: [
                 { driverId, status: 'IN_PROGRESS' },
@@ -179,7 +178,7 @@ let TrackingController = class TrackingController {
             })),
         };
     }
-    async endDriverShift(driverId, body) {
+    async endDriverShift(driverId) {
         const driver = await this.driverRepo.findOne({ where: { userId: driverId } });
         if (!driver) {
             throw new common_1.HttpException('Driver not found', common_1.HttpStatus.NOT_FOUND);
@@ -222,9 +221,8 @@ __decorate([
 __decorate([
     (0, common_1.Post)('driver/:driverId/shift/end'),
     __param(0, (0, common_1.Param)('driverId')),
-    __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], TrackingController.prototype, "endDriverShift", null);
 __decorate([

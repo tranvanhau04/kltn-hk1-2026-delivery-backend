@@ -1,10 +1,10 @@
 export declare class MaxFlowService {
     constructor();
-    calculateMaxFlow(source: string, sink: string, capacities: any): {
+    calculateMaxFlow(_source: string, _sink: string, _capacities: unknown): {
         maxFlow: number;
         assignments: any;
     };
-    assignOrdersToDrivers(orders: any[], drivers: any[]): {
+    assignOrdersToDrivers(_orders: unknown[], _drivers: unknown[]): {
         assigned: never[];
         unassigned: never[];
     };

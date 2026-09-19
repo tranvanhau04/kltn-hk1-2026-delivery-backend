@@ -14,22 +14,33 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.OrdersController = void 0;
 const common_1 = require("@nestjs/common");
-const typeorm_1 = require("@nestjs/typeorm");
-const typeorm_2 = require("typeorm");
-const order_entity_1 = require("../entities/order.entity");
+const orders_service_1 = require("./orders.service");
+const update_coordinates_dto_1 = require("./dto/update-coordinates.dto");
 let OrdersController = class OrdersController {
-    orderRepo;
-    constructor(orderRepo) {
-        this.orderRepo = orderRepo;
-    }
-    findPool() {
-        return this.orderRepo.find({ where: { status: 'NEW' } });
+    ordersService;
+    constructor(ordersService) {
+        this.ordersService = ordersService;
     }
     findAll() {
-        return this.orderRepo.find();
+        return this.ordersService.findAll();
+    }
+    findPool() {
+        return this.ordersService.findPool();
+    }
+    findOne(id) {
+        return this.ordersService.findById(id);
+    }
+    updateCoordinates(id, dto) {
+        return this.ordersService.updateCoordinates(id, dto);
     }
 };
 exports.OrdersController = OrdersController;
+__decorate([
+    (0, common_1.Get)(),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", Promise)
+], OrdersController.prototype, "findAll", null);
 __decorate([
     (0, common_1.Get)('pool'),
     __metadata("design:type", Function),
@@ -37,14 +48,22 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], OrdersController.prototype, "findPool", null);
 __decorate([
-    (0, common_1.Get)(),
+    (0, common_1.Get)(':id'),
+    __param(0, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
-], OrdersController.prototype, "findAll", null);
+], OrdersController.prototype, "findOne", null);
+__decorate([
+    (0, common_1.Patch)(':id/coordinates'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, update_coordinates_dto_1.UpdateCoordinatesDto]),
+    __metadata("design:returntype", Promise)
+], OrdersController.prototype, "updateCoordinates", null);
 exports.OrdersController = OrdersController = __decorate([
     (0, common_1.Controller)('orders'),
-    __param(0, (0, typeorm_1.InjectRepository)(order_entity_1.Order)),
-    __metadata("design:paramtypes", [typeorm_2.Repository])
+    __metadata("design:paramtypes", [orders_service_1.OrdersService])
 ], OrdersController);
 //# sourceMappingURL=orders.controller.js.map
