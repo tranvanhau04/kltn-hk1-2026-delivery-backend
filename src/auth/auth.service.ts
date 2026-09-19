@@ -71,11 +71,12 @@ export class AuthService {
       this.jwtService.signAsync(accessPayload),
       this.jwtService.signAsync(refreshPayload, {
         secret: refreshSecret,
-        expiresIn: refreshExpiresIn as any,
+        expiresIn: refreshExpiresIn as `${number}d` | `${number}h` | `${number}s`,
       }),
     ]);
 
-    const { passwordHash, ...safeUser } = user;
+    const safeUser = { ...user };
+    delete (safeUser as Partial<User>).passwordHash;
 
     return {
       accessToken,
