@@ -48,6 +48,19 @@ CREATE TABLE `users` (
     CONSTRAINT `chk_user_status` CHECK (`status` IN ('ACTIVE', 'INACTIVE', 'LOCKED'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 1.1. BẢNG KHÔI PHỤC MẬT KHẨU (PASSWORD_RESETS)
+CREATE TABLE IF NOT EXISTS `password_resets` (
+    `id` VARCHAR(36) PRIMARY KEY,
+    `email` VARCHAR(150) NOT NULL,
+    `otp_hash` VARCHAR(64) NOT NULL,
+    `token_hash` VARCHAR(64) NOT NULL,
+    `expires_at` TIMESTAMP NOT NULL,
+    `is_used` BOOLEAN NOT NULL DEFAULT FALSE,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_password_resets_email` (`email`),
+    INDEX `idx_password_resets_token_hash` (`token_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 2. BẢNG MỞ RỘNG THÔNG TIN TÀI XẾ (DRIVERS)
 -- FK = USER.id (one-to-one extension, không có created_at/updated_at riêng theo ERD)
 CREATE TABLE `drivers` (
