@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryColumn, CreateDateColumn } from 'typeorm';
+import { Entity, PrimaryColumn, CreateDateColumn } from 'typeorm';
 
 /**
  * Maps to the `zone_drivers` join table (pre-existing schema).
