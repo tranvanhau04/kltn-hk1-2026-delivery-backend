@@ -43,34 +43,34 @@ async function fetchWithTimeout(url, options, timeout = 2500) {
     }
 }
 async function fetchOsrmTableWithRetry(coords) {
-    const coordStr = coords.map(c => `${c[0]},${c[1]}`).join(';');
+    const coordStr = coords.map((c) => `${c[0]},${c[1]}`).join(';');
     const url = `https://router.project-osrm.org/table/v1/driving/${coordStr}?annotations=distance,duration`;
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
             const res = await fetchWithTimeout(url, {}, 2500);
             if (res.ok) {
-                const data = await res.json();
+                const data = (await res.json());
                 if (data.code === 'Ok' && data.distances && data.durations) {
                     return { distances: data.distances, durations: data.durations };
                 }
             }
         }
-        catch (e) {
+        catch {
             if (attempt === 1) {
-                await new Promise(r => setTimeout(r, 300));
+                await new Promise((r) => setTimeout(r, 300));
             }
         }
     }
     return null;
 }
 async function fetchOsrmRouteWithRetry(coords) {
-    const coordStr = coords.map(c => `${c[0]},${c[1]}`).join(';');
+    const coordStr = coords.map((c) => `${c[0]},${c[1]}`).join(';');
     const url = `https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson`;
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
             const res = await fetchWithTimeout(url, {}, 2500);
             if (res.ok) {
-                const data = await res.json();
+                const data = (await res.json());
                 if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
                     const route = data.routes[0];
                     const geometry = route.geometry;
@@ -81,14 +81,14 @@ async function fetchOsrmRouteWithRetry(coords) {
                     return {
                         distance: route.distance / 1000,
                         duration: route.duration / 60,
-                        polyline
+                        polyline,
                     };
                 }
             }
         }
-        catch (e) {
+        catch {
             if (attempt === 1) {
-                await new Promise(r => setTimeout(r, 300));
+                await new Promise((r) => setTimeout(r, 300));
             }
         }
     }
@@ -100,14 +100,17 @@ let VrpService = class VrpService {
         const availableDrivers = drivers.filter((d) => d.maxWeightKg > 0);
         const allCoords = [
             [Number(depot.longitude), Number(depot.latitude)],
-            ...orders.map(o => [Number(o.longitude), Number(o.latitude)])
+            ...orders.map((o) => [Number(o.longitude), Number(o.latitude)]),
         ];
         let osrmMatrix = null;
         if (allCoords.length <= 100) {
             osrmMatrix = await fetchOsrmTableWithRetry(allCoords);
         }
         const getDistance = (idx1, idx2, lat1, lng1, lat2, lng2) => {
-            if (osrmMatrix && osrmMatrix.distances && osrmMatrix.distances[idx1] && osrmMatrix.distances[idx1][idx2] !== undefined) {
+            if (osrmMatrix &&
+                osrmMatrix.distances &&
+                osrmMatrix.distances[idx1] &&
+                osrmMatrix.distances[idx1][idx2] !== undefined) {
                 return osrmMatrix.distances[idx1][idx2] / 1000;
             }
             return haversine(lat1, lng1, lat2, lng2) * 1.35;
@@ -159,7 +162,7 @@ let VrpService = class VrpService {
             let polyline = [];
             if (osrmRoute) {
                 totalDist = osrmRoute.distance;
-                totalTime = osrmRoute.duration + (routeStops.length * 8);
+                totalTime = osrmRoute.duration + routeStops.length * 8;
                 polyline = osrmRoute.polyline;
             }
             else {
@@ -169,7 +172,9 @@ let VrpService = class VrpService {
                     [Number(depot.latitude), Number(depot.longitude)],
                 ];
                 for (let i = 0; i < polyline.length - 1; i++) {
-                    totalDist += haversine(polyline[i][0], polyline[i][1], polyline[i + 1][0], polyline[i + 1][1]) * 1.35;
+                    totalDist +=
+                        haversine(polyline[i][0], polyline[i][1], polyline[i + 1][0], polyline[i + 1][1]) *
+                            1.35;
                 }
                 totalTime = Math.round((totalDist / 25) * 60 + routeStops.length * 8);
             }

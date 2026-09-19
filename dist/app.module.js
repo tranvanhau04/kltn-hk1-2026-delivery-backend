@@ -15,18 +15,14 @@ const depots_module_1 = require("./depots/depots.module");
 const orders_module_1 = require("./orders/orders.module");
 const vrp_module_1 = require("./vrp/vrp.module");
 const tracking_module_1 = require("./tracking/tracking.module");
+const zones_module_1 = require("./zones/zones.module");
+const drivers_module_1 = require("./drivers/drivers.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
 exports.AppModule = AppModule = __decorate([
     (0, common_1.Module)({
-        imports: [
-            database_module_1.DatabaseModule,
-            depots_module_1.DepotsModule,
-            orders_module_1.OrdersModule,
-            vrp_module_1.VrpModule,
-            tracking_module_1.TrackingModule,
-        ],
+        imports: [database_module_1.DatabaseModule, depots_module_1.DepotsModule, orders_module_1.OrdersModule, vrp_module_1.VrpModule, tracking_module_1.TrackingModule, zones_module_1.ZonesModule, drivers_module_1.DriversModule],
         controllers: [app_controller_1.AppController],
         providers: [app_service_1.AppService],
     })
