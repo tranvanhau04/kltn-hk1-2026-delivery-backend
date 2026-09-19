@@ -20,7 +20,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: JwtPayload): Promise<JwtPayload> {
+  validate(payload: JwtPayload): JwtPayload {
     if (!payload || !payload.role || !Object.values(UserRole).includes(payload.role)) {
       throw new UnauthorizedException('Invalid token role');
     }
