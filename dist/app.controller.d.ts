@@ -1,5 +1,4 @@
 import { AppService } from './app.service';
-import type { JwtPayload } from './auth/interfaces/jwt-payload.interface';
 export declare class AppController {
     private readonly appService;
     constructor(appService: AppService);
@@ -7,5 +6,4 @@ export declare class AppController {
     getHealth(): {
         status: string;
     };
-    getProfile(user: JwtPayload): JwtPayload;
 }
