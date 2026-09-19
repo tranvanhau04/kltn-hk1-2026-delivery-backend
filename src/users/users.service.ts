@@ -6,19 +6,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not, Like } from 'typeorm';
+import { Repository, Not } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import { User, UserRole, UserStatus } from '../entities/user.entity';
 import { Driver } from '../entities/driver.entity';
-import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
-import {
-  CreateUserDto,
-  UpdateUserDto,
-  UpdateRoleDto,
-  UpdateStatusDto,
-  QueryUserDto,
-} from './dto';
+import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { CreateUserDto, UpdateUserDto, UpdateRoleDto, UpdateStatusDto, QueryUserDto } from './dto';
 
 @Injectable()
 export class UsersService {
@@ -55,10 +49,7 @@ export class UsersService {
       );
     }
 
-    queryBuilder
-      .orderBy('user.createdAt', 'DESC')
-      .skip(skip)
-      .take(limit);
+    queryBuilder.orderBy('user.createdAt', 'DESC').skip(skip).take(limit);
 
     const [users, total] = await queryBuilder.getManyAndCount();
 
@@ -129,7 +120,8 @@ export class UsersService {
     const savedUser = await this.userRepo.save(user);
 
     // Return sanitized user without passwordHash
-    const { passwordHash: _, ...result } = savedUser;
+    const result = { ...savedUser };
+    delete (result as Partial<User>).passwordHash;
     return result;
   }
 

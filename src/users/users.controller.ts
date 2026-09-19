@@ -11,13 +11,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
-import {
-  CreateUserDto,
-  UpdateUserDto,
-  UpdateRoleDto,
-  UpdateStatusDto,
-  QueryUserDto,
-} from './dto';
+import { CreateUserDto, UpdateUserDto, UpdateRoleDto, UpdateStatusDto, QueryUserDto } from './dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../entities/user.entity';
@@ -109,10 +103,7 @@ export class UsersController {
    */
   @Delete(':id')
   @Roles(UserRole.ADMIN)
-  safeDeactivate(
-    @Param('id') id: string,
-    @CurrentUser() currentUser: JwtPayload,
-  ) {
+  safeDeactivate(@Param('id') id: string, @CurrentUser() currentUser: JwtPayload) {
     return this.usersService.safeDeactivate(id, currentUser);
   }
 }

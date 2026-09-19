@@ -9,6 +9,9 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    env:
+      JWT_SECRET: test-jwt-secret-key-for-github-ci-123456
+      JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-github-ci-123456
     
     services:
       mysql:
