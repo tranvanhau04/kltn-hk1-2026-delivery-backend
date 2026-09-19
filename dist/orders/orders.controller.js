@@ -17,6 +17,8 @@ const common_1 = require("@nestjs/common");
 const typeorm_1 = require("@nestjs/typeorm");
 const typeorm_2 = require("typeorm");
 const order_entity_1 = require("../entities/order.entity");
+const roles_decorator_1 = require("../auth/decorators/roles.decorator");
+const user_entity_1 = require("../entities/user.entity");
 let OrdersController = class OrdersController {
     orderRepo;
     constructor(orderRepo) {
@@ -32,12 +34,14 @@ let OrdersController = class OrdersController {
 exports.OrdersController = OrdersController;
 __decorate([
     (0, common_1.Get)('pool'),
+    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)
 ], OrdersController.prototype, "findPool", null);
 __decorate([
     (0, common_1.Get)(),
+    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", Promise)

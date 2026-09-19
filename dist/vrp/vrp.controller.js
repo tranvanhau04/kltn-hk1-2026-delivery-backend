@@ -48,15 +48,11 @@ let VrpController = class VrpController {
         if (!depot)
             throw new Error('No depot found');
         const orders = await this.orderRepo.find({
-            where: dto.orderIds?.length
-                ? { id: (0, typeorm_2.In)(dto.orderIds) }
-                : { status: 'NEW' },
+            where: dto.orderIds?.length ? { id: (0, typeorm_2.In)(dto.orderIds) } : { status: 'NEW' },
         });
         const driversRaw = await this.driverRepo.find(dto.driverIds?.length ? { where: { userId: (0, typeorm_2.In)(dto.driverIds) } } : {});
         const userIds = driversRaw.map((d) => d.userId);
-        const users = userIds.length
-            ? await this.userRepo.find({ where: { id: (0, typeorm_2.In)(userIds) } })
-            : [];
+        const users = userIds.length ? await this.userRepo.find({ where: { id: (0, typeorm_2.In)(userIds) } }) : [];
         const userMap = new Map(users.map((u) => [u.id, u]));
         const drivers = driversRaw
             .filter((d) => d.currentShiftStatus !== 'OFFLINE')

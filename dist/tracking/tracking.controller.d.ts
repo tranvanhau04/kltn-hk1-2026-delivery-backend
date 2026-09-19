@@ -78,7 +78,7 @@ export declare class TrackingController {
         }[];
         message?: undefined;
     }>;
-    endDriverShift(driverId: string, body: any): Promise<{
+    endDriverShift(driverId: string): Promise<{
         success: boolean;
     }>;
     startDriverShift(driverId: string): Promise<{
