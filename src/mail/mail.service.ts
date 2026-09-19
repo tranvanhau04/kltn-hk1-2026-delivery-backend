@@ -27,11 +27,7 @@ export class MailService {
   /**
    * Send password reset email containing 6-digit OTP and reset web link.
    */
-  async sendPasswordResetEmail(
-    toEmail: string,
-    otp: string,
-    resetLink: string,
-  ): Promise<boolean> {
+  async sendPasswordResetEmail(toEmail: string, otp: string, resetLink: string): Promise<boolean> {
     const isDev = (this.configService.get<string>('NODE_ENV') || 'development') === 'development';
     const mailFrom =
       this.configService.get<string>('MAIL_FROM') ||
@@ -70,11 +66,12 @@ export class MailService {
         });
         this.logger.log(`Password reset email sent successfully to ${toEmail}`);
         return true;
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
         if (isDev) {
           // In development mode: fallback to console preview so local testing & grading is seamless
           this.logger.warn(
-            `[DEV FALLBACK] SMTP failed (${err.message}). Printing reset credentials to console for local testing:`,
+            `[DEV FALLBACK] SMTP failed (${errorMessage}). Printing reset credentials to console for local testing:`,
           );
           this.logger.warn(`>>> Target Email: ${toEmail}`);
           this.logger.warn(`>>> OTP: ${otp}`);
@@ -82,9 +79,7 @@ export class MailService {
           return true;
         } else {
           // In production mode: strictly log error without exposing secrets
-          this.logger.error(
-            `Failed to send password reset email to ${toEmail}: ${err.message}`,
-          );
+          this.logger.error(`Failed to send password reset email to ${toEmail}: ${errorMessage}`);
           return false;
         }
       }
