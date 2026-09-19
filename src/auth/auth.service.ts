@@ -80,11 +80,12 @@ export class AuthService {
       this.jwtService.signAsync(accessPayload),
       this.jwtService.signAsync(refreshPayload, {
         secret: refreshSecret,
-        expiresIn: refreshExpiresIn as any,
+        expiresIn: refreshExpiresIn as `${number}d` | `${number}h` | `${number}s`,
       }),
     ]);
 
-    const { passwordHash, ...safeUser } = user;
+    const safeUser = { ...user };
+    delete (safeUser as Partial<User>).passwordHash;
 
     return {
       accessToken,
@@ -107,8 +108,7 @@ export class AuthService {
   async forgotPassword(dto: ForgotPasswordDto) {
     const neutralResponse = {
       statusCode: 200,
-      message:
-        'If this email is registered in our system, a password reset code has been sent.',
+      message: 'If this email is registered in our system, a password reset code has been sent.',
     };
 
     const normalizedEmail = dto.email.trim().toLowerCase();
@@ -161,14 +161,12 @@ export class AuthService {
     // Dispatch email
     await this.mailService.sendPasswordResetEmail(normalizedEmail, otp, resetLink);
 
-    const isDev =
-      (this.configService.get<string>('NODE_ENV') || 'development') === 'development';
+    const isDev = (this.configService.get<string>('NODE_ENV') || 'development') === 'development';
 
     if (isDev) {
       return {
         statusCode: 200,
-        message:
-          'If this email is registered in our system, a password reset code has been sent.',
+        message: 'If this email is registered in our system, a password reset code has been sent.',
         debugOtp: otp,
         debugResetLink: resetLink,
       };
