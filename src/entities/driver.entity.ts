@@ -1,5 +1,11 @@
 import { Entity, Column, PrimaryColumn } from 'typeorm';
 
+export enum DriverShiftStatus {
+  OFFLINE = 'OFFLINE',
+  ONLINE_READY = 'ONLINE_READY',
+  BUSY = 'BUSY',
+}
+
 /**
  * Flat view of driver joined with user info.
  * Maps to the `drivers` table; full name is fetched via query joining users.

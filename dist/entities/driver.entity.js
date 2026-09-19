@@ -9,8 +9,14 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Driver = void 0;
+exports.Driver = exports.DriverShiftStatus = void 0;
 const typeorm_1 = require("typeorm");
+var DriverShiftStatus;
+(function (DriverShiftStatus) {
+    DriverShiftStatus["OFFLINE"] = "OFFLINE";
+    DriverShiftStatus["ONLINE_READY"] = "ONLINE_READY";
+    DriverShiftStatus["BUSY"] = "BUSY";
+})(DriverShiftStatus || (exports.DriverShiftStatus = DriverShiftStatus = {}));
 let Driver = class Driver {
     userId;
     licensePlate;
