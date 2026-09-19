@@ -11,6 +11,7 @@ import { TrackingModule } from './tracking/tracking.module';
 import { ZonesModule } from './zones/zones.module';
 import { DriversModule } from './drivers/drivers.module';
 import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 
@@ -20,6 +21,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
       isGlobal: true,
     }),
     AuthModule,
+    UsersModule,
     DatabaseModule,
     DepotsModule,
     OrdersModule,

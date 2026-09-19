@@ -20,6 +20,7 @@ const tracking_module_1 = require("./tracking/tracking.module");
 const zones_module_1 = require("./zones/zones.module");
 const drivers_module_1 = require("./drivers/drivers.module");
 const auth_module_1 = require("./auth/auth.module");
+const users_module_1 = require("./users/users.module");
 const jwt_auth_guard_1 = require("./auth/guards/jwt-auth.guard");
 const roles_guard_1 = require("./auth/guards/roles.guard");
 let AppModule = class AppModule {
@@ -32,6 +33,7 @@ exports.AppModule = AppModule = __decorate([
                 isGlobal: true,
             }),
             auth_module_1.AuthModule,
+            users_module_1.UsersModule,
             database_module_1.DatabaseModule,
             depots_module_1.DepotsModule,
             orders_module_1.OrdersModule,
