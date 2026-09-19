@@ -10,12 +10,20 @@ import { Repository, Not } from 'typeorm';
 import { Driver, DriverShiftStatus } from '../entities/driver.entity';
 import { User, UserRole } from '../entities/user.entity';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
-import {
-  CreateDriverDto,
-  UpdateDriverDto,
-  UpdateShiftStatusDto,
-  QueryDriverDto,
-} from './dto';
+import { CreateDriverDto, UpdateDriverDto, UpdateShiftStatusDto, QueryDriverDto } from './dto';
+
+interface DriverRawRow {
+  userId: string;
+  licensePlate: string;
+  vehicleType: string;
+  maxWeightKg: string | number;
+  maxVolumeM3: string | number;
+  currentShiftStatus: DriverShiftStatus;
+  fullName: string;
+  phone: string;
+  email: string;
+  userStatus: string;
+}
 
 @Injectable()
 export class DriversService {
@@ -78,9 +86,9 @@ export class DriversService {
       .orderBy('driver.license_plate', 'ASC')
       .offset(skip)
       .limit(limit)
-      .getRawMany();
+      .getRawMany<DriverRawRow>();
 
-    const formattedData = rawData.map((d) => ({
+    const formattedData = rawData.map((d: DriverRawRow) => ({
       userId: d.userId,
       licensePlate: d.licensePlate,
       vehicleType: d.vehicleType,
@@ -113,16 +121,12 @@ export class DriversService {
    */
   async findByUserId(userId: string, currentUser: JwtPayload) {
     if (currentUser.role === UserRole.DRIVER && currentUser.sub !== userId) {
-      throw new ForbiddenException(
-        'Drivers are only allowed to view their own vehicle profile',
-      );
+      throw new ForbiddenException('Drivers are only allowed to view their own vehicle profile');
     }
 
     const driver = await this.driverRepo.findOne({ where: { userId } });
     if (!driver) {
-      throw new NotFoundException(
-        `Driver profile with user ID '${userId}' not found`,
-      );
+      throw new NotFoundException(`Driver profile with user ID '${userId}' not found`);
     }
 
     const user = await this.userRepo.findOne({ where: { id: userId } });
@@ -155,16 +159,12 @@ export class DriversService {
     }
 
     if (user.role !== UserRole.DRIVER) {
-      throw new BadRequestException(
-        'Cannot configure vehicle profile for non-driver user',
-      );
+      throw new BadRequestException('Cannot configure vehicle profile for non-driver user');
     }
 
     const existingProfile = await this.driverRepo.findOne({ where: { userId } });
     if (existingProfile) {
-      throw new ConflictException(
-        'Driver vehicle profile already exists. Use PATCH to update.',
-      );
+      throw new ConflictException('Driver vehicle profile already exists. Use PATCH to update.');
     }
 
     const existingPlate = await this.driverRepo.findOne({
@@ -201,9 +201,7 @@ export class DriversService {
   async update(userId: string, dto: UpdateDriverDto) {
     const driver = await this.driverRepo.findOne({ where: { userId } });
     if (!driver) {
-      throw new NotFoundException(
-        `Driver profile with user ID '${userId}' not found`,
-      );
+      throw new NotFoundException(`Driver profile with user ID '${userId}' not found`);
     }
 
     if (dto.licensePlate && dto.licensePlate !== driver.licensePlate) {
@@ -243,22 +241,14 @@ export class DriversService {
    * Update driver shift status (OFFLINE, ONLINE_READY, BUSY).
    * Access: ADMIN, DISPATCHER, DRIVER (self only).
    */
-  async updateShiftStatus(
-    userId: string,
-    dto: UpdateShiftStatusDto,
-    currentUser: JwtPayload,
-  ) {
+  async updateShiftStatus(userId: string, dto: UpdateShiftStatusDto, currentUser: JwtPayload) {
     if (currentUser.role === UserRole.DRIVER && currentUser.sub !== userId) {
-      throw new ForbiddenException(
-        'Drivers can only update their own shift status',
-      );
+      throw new ForbiddenException('Drivers can only update their own shift status');
     }
 
     const driver = await this.driverRepo.findOne({ where: { userId } });
     if (!driver) {
-      throw new NotFoundException(
-        `Driver profile with user ID '${userId}' not found`,
-      );
+      throw new NotFoundException(`Driver profile with user ID '${userId}' not found`);
     }
 
     driver.currentShiftStatus = dto.currentShiftStatus;
@@ -279,9 +269,7 @@ export class DriversService {
   async remove(userId: string) {
     const driver = await this.driverRepo.findOne({ where: { userId } });
     if (!driver) {
-      throw new NotFoundException(
-        `Driver profile with user ID '${userId}' not found`,
-      );
+      throw new NotFoundException(`Driver profile with user ID '${userId}' not found`);
     }
 
     await this.driverRepo.delete({ userId });

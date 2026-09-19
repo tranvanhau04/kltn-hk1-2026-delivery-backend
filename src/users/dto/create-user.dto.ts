@@ -15,21 +15,24 @@ export class CreateUserDto {
   @IsNotEmpty({ message: 'Full name is required' })
   @IsString({ message: 'Full name must be a string' })
   @MaxLength(100, { message: 'Full name must not exceed 100 characters' })
-  @Transform(({ value }) => value?.trim())
+  @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : ''))
   fullName: string;
 
   @IsNotEmpty({ message: 'Email is required' })
   @IsEmail({}, { message: 'Invalid email format' })
   @MaxLength(150, { message: 'Email must not exceed 150 characters' })
-  @Transform(({ value }) => value?.trim().toLowerCase())
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : '',
+  )
   email: string;
 
   @IsNotEmpty({ message: 'Phone number is required' })
   @IsString({ message: 'Phone number must be a string' })
   @Matches(/^(0|\+84)[3|5|7|8|9][0-9]{8}$/, {
-    message: 'Phone must be a valid Vietnamese mobile number (10 digits starting with 03, 05, 07, 08, 09)',
+    message:
+      'Phone must be a valid Vietnamese mobile number (10 digits starting with 03, 05, 07, 08, 09)',
   })
-  @Transform(({ value }) => value?.trim())
+  @Transform(({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : ''))
   phone: string;
 
   @IsOptional()

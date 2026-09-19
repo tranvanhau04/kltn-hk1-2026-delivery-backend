@@ -11,12 +11,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { DriversService } from './drivers.service';
-import {
-  CreateDriverDto,
-  UpdateDriverDto,
-  UpdateShiftStatusDto,
-  QueryDriverDto,
-} from './dto';
+import { CreateDriverDto, UpdateDriverDto, UpdateShiftStatusDto, QueryDriverDto } from './dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../entities/user.entity';
@@ -44,10 +39,7 @@ export class DriversController {
    */
   @Get(':userId')
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
-  findByUserId(
-    @Param('userId') userId: string,
-    @CurrentUser() currentUser: JwtPayload,
-  ) {
+  findByUserId(@Param('userId') userId: string, @CurrentUser() currentUser: JwtPayload) {
     return this.driversService.findByUserId(userId, currentUser);
   }
 
@@ -59,10 +51,7 @@ export class DriversController {
   @Post(':userId')
   @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.CREATED)
-  create(
-    @Param('userId') userId: string,
-    @Body() dto: CreateDriverDto,
-  ) {
+  create(@Param('userId') userId: string, @Body() dto: CreateDriverDto) {
     return this.driversService.create(userId, dto);
   }
 
@@ -73,10 +62,7 @@ export class DriversController {
    */
   @Patch(':userId')
   @Roles(UserRole.ADMIN)
-  update(
-    @Param('userId') userId: string,
-    @Body() dto: UpdateDriverDto,
-  ) {
+  update(@Param('userId') userId: string, @Body() dto: UpdateDriverDto) {
     return this.driversService.update(userId, dto);
   }
 

@@ -14,13 +14,17 @@ export class CreateDriverDto {
   @IsNotEmpty({ message: 'License plate is required' })
   @IsString({ message: 'License plate must be a string' })
   @MaxLength(20, { message: 'License plate must not exceed 20 characters' })
-  @Transform(({ value }) => value?.trim().toUpperCase())
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : '',
+  )
   licensePlate: string;
 
   @IsNotEmpty({ message: 'Vehicle type is required' })
   @IsString({ message: 'Vehicle type must be a string' })
   @MaxLength(30, { message: 'Vehicle type must not exceed 30 characters' })
-  @Transform(({ value }) => value?.trim().toUpperCase())
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : '',
+  )
   vehicleType: string;
 
   @IsNotEmpty({ message: 'Max weight capacity is required' })

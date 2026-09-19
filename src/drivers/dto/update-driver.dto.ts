@@ -1,23 +1,21 @@
-import {
-  IsNumber,
-  IsOptional,
-  IsString,
-  MaxLength,
-  Min,
-} from 'class-validator';
+import { IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 export class UpdateDriverDto {
   @IsOptional()
   @IsString({ message: 'License plate must be a string' })
   @MaxLength(20, { message: 'License plate must not exceed 20 characters' })
-  @Transform(({ value }) => value?.trim().toUpperCase())
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : undefined,
+  )
   licensePlate?: string;
 
   @IsOptional()
   @IsString({ message: 'Vehicle type must be a string' })
   @MaxLength(30, { message: 'Vehicle type must not exceed 30 characters' })
-  @Transform(({ value }) => value?.trim().toUpperCase())
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : undefined,
+  )
   vehicleType?: string;
 
   @IsOptional()
