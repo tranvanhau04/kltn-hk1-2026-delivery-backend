@@ -9,8 +9,16 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Order = void 0;
+exports.Order = exports.OrderStatus = void 0;
 const typeorm_1 = require("typeorm");
+var OrderStatus;
+(function (OrderStatus) {
+    OrderStatus["NEW"] = "NEW";
+    OrderStatus["ASSIGNED"] = "ASSIGNED";
+    OrderStatus["IN_TRANSIT"] = "IN_TRANSIT";
+    OrderStatus["DELIVERED"] = "DELIVERED";
+    OrderStatus["FAILED"] = "FAILED";
+})(OrderStatus || (exports.OrderStatus = OrderStatus = {}));
 let Order = class Order {
     id;
     code;
@@ -78,7 +86,7 @@ __decorate([
     __metadata("design:type", Number)
 ], Order.prototype, "codAmount", void 0);
 __decorate([
-    (0, typeorm_1.Column)({ name: 'status', type: 'varchar', length: 20, default: 'NEW' }),
+    (0, typeorm_1.Column)({ name: 'status', type: 'varchar', length: 20, default: OrderStatus.NEW }),
     __metadata("design:type", String)
 ], Order.prototype, "status", void 0);
 __decorate([

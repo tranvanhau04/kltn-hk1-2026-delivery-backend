@@ -14,8 +14,10 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.OrdersController = void 0;
 const common_1 = require("@nestjs/common");
+const platform_express_1 = require("@nestjs/platform-express");
 const orders_service_1 = require("./orders.service");
 const update_coordinates_dto_1 = require("./dto/update-coordinates.dto");
+const query_order_dto_1 = require("./dto/query-order.dto");
 const roles_decorator_1 = require("../auth/decorators/roles.decorator");
 const user_entity_1 = require("../entities/user.entity");
 let OrdersController = class OrdersController {
@@ -23,8 +25,8 @@ let OrdersController = class OrdersController {
     constructor(ordersService) {
         this.ordersService = ordersService;
     }
-    findAll() {
-        return this.ordersService.findAll();
+    findAll(query) {
+        return this.ordersService.findAll(query);
     }
     findPool() {
         return this.ordersService.findPool();
@@ -35,14 +37,18 @@ let OrdersController = class OrdersController {
     updateCoordinates(id, dto) {
         return this.ordersService.updateCoordinates(id, dto);
     }
+    importExcel(file) {
+        return this.ordersService.importExcel(file);
+    }
 };
 exports.OrdersController = OrdersController;
 __decorate([
     (0, common_1.Get)(),
     (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),
+    __param(0, (0, common_1.Query)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", Promise)
+    __metadata("design:paramtypes", [query_order_dto_1.QueryOrderDto]),
+    __metadata("design:returntype", void 0)
 ], OrdersController.prototype, "findAll", null);
 __decorate([
     (0, common_1.Get)('pool'),
@@ -66,6 +72,15 @@ __decorate([
     __metadata("design:paramtypes", [String, update_coordinates_dto_1.UpdateCoordinatesDto]),
     __metadata("design:returntype", Promise)
 ], OrdersController.prototype, "updateCoordinates", null);
+__decorate([
+    (0, common_1.Post)('import-excel'),
+    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file')),
+    __param(0, (0, common_1.UploadedFile)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], OrdersController.prototype, "importExcel", null);
 exports.OrdersController = OrdersController = __decorate([
     (0, common_1.Controller)('orders'),
     __metadata("design:paramtypes", [orders_service_1.OrdersService])

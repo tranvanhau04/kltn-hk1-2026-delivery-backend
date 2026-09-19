@@ -10,6 +10,7 @@ import { User } from '../entities/user.entity';
 import { Zone } from '../entities/zone.entity';
 import { ZoneDriver } from '../entities/zone-driver.entity';
 import { PasswordReset } from '../entities/password-reset.entity';
+import { OrderStatusHistory } from '../entities/order-status-history.entity';
 
 @Module({
   imports: [
@@ -20,7 +21,19 @@ import { PasswordReset } from '../entities/password-reset.entity';
       username: 'root',
       password: 'sapassword',
       database: 'delivery_db',
-      entities: [Depot, Order, Driver, Route, Stop, TrackingLog, User, Zone, ZoneDriver, PasswordReset],
+      entities: [
+        Depot,
+        Order,
+        Driver,
+        Route,
+        Stop,
+        TrackingLog,
+        User,
+        Zone,
+        ZoneDriver,
+        PasswordReset,
+        OrderStatusHistory,
+      ],
       synchronize: false, // schema already created by init.sql
       logging: false,
       charset: 'utf8mb4_unicode_ci',
