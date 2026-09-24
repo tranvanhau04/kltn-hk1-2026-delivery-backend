@@ -13,6 +13,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { OrdersService } from './orders.service';
 import { UpdateCoordinatesDto } from './dto/update-coordinates.dto';
 import { QueryOrderDto } from './dto/query-order.dto';
+import { CreateOrderDto } from './dto/create-order.dto';
 import { Order } from '../entities/order.entity';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../entities/user.entity';
@@ -20,6 +21,13 @@ import { UserRole } from '../entities/user.entity';
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
+
+  /** POST /api/orders — create manual order */
+  @Post()
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  create(@Body() dto: CreateOrderDto) {
+    return this.ordersService.create(dto);
+  }
 
   /** GET /api/orders — all orders */
   @Get()
