@@ -9,6 +9,7 @@ import { OrderStatusHistory } from '../entities/order-status-history.entity';
 import { GeocodingService } from '../geocoding/geocoding.service';
 import { UpdateCoordinatesDto } from './dto/update-coordinates.dto';
 import { QueryOrderDto } from './dto/query-order.dto';
+import { CreateOrderDto } from './dto/create-order.dto';
 
 /** Default Hub coordinates (IUH campus, Gò Vấp) used as geocoding fallback */
 const DEFAULT_DEPOT_LAT = 10.8468;
@@ -77,6 +78,53 @@ export class OrdersService {
     if (!order) {
       throw new NotFoundException(`Không tìm thấy đơn hàng với ID: ${id}`);
     }
+    return order;
+  }
+
+  /** Creates a single new order */
+  async create(dto: CreateOrderDto): Promise<Order> {
+    const order = new Order();
+    order.id = crypto.randomUUID();
+    order.code = this.generateOrderCode();
+    order.receiverName = dto.receiverName;
+    order.receiverPhone = dto.receiverPhone;
+    order.deliveryAddress = dto.deliveryAddress;
+    order.weightKg = dto.weightKg ?? 0;
+    order.volumeM3 = dto.volumeM3 ?? 0;
+    order.codAmount = dto.codAmount ?? 0;
+    order.zoneId = dto.zoneId ?? null;
+    order.notes = dto.notes ?? null;
+    order.status = OrderStatus.NEW;
+
+    let lat = dto.latitude;
+    let lng = dto.longitude;
+
+    if (!lat || !lng || lat === 0 || lng === 0) {
+      const depot = await this.depotRepo.findOne({ where: {} });
+      const fallbackLat = depot ? Number(depot.latitude) : DEFAULT_DEPOT_LAT;
+      const fallbackLng = depot ? Number(depot.longitude) : DEFAULT_DEPOT_LNG;
+      const geo = await this.geocodingService.geocodeAddress(
+        order.deliveryAddress,
+        fallbackLat,
+        fallbackLng,
+      );
+      lat = geo.latitude;
+      lng = geo.longitude;
+    }
+
+    order.latitude = lat;
+    order.longitude = lng;
+
+    const history = new OrderStatusHistory();
+    history.orderId = order.id;
+    history.status = order.status;
+    history.note = 'Tạo đơn hàng thủ công';
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.save(Order, order);
+      await manager.save(OrderStatusHistory, history);
+    });
+
     return order;
   }
 

@@ -18,12 +18,16 @@ const platform_express_1 = require("@nestjs/platform-express");
 const orders_service_1 = require("./orders.service");
 const update_coordinates_dto_1 = require("./dto/update-coordinates.dto");
 const query_order_dto_1 = require("./dto/query-order.dto");
+const create_order_dto_1 = require("./dto/create-order.dto");
 const roles_decorator_1 = require("../auth/decorators/roles.decorator");
 const user_entity_1 = require("../entities/user.entity");
 let OrdersController = class OrdersController {
     ordersService;
     constructor(ordersService) {
         this.ordersService = ordersService;
+    }
+    create(dto) {
+        return this.ordersService.create(dto);
     }
     findAll(query) {
         return this.ordersService.findAll(query);
@@ -37,11 +41,29 @@ let OrdersController = class OrdersController {
     updateCoordinates(id, dto) {
         return this.ordersService.updateCoordinates(id, dto);
     }
-    importExcel(file) {
-        return this.ordersService.importExcel(file);
+    async importExcel(file) {
+        try {
+            return await this.ordersService.importExcel(file);
+        }
+        catch (error) {
+            console.error('Import Excel Error:', error);
+            return {
+                statusCode: 500,
+                message: error.message,
+                stack: error.stack,
+            };
+        }
     }
 };
 exports.OrdersController = OrdersController;
+__decorate([
+    (0, common_1.Post)(),
+    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [create_order_dto_1.CreateOrderDto]),
+    __metadata("design:returntype", void 0)
+], OrdersController.prototype, "create", null);
 __decorate([
     (0, common_1.Get)(),
     (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),
@@ -59,6 +81,7 @@ __decorate([
 ], OrdersController.prototype, "findPool", null);
 __decorate([
     (0, common_1.Get)(':id'),
+    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),
     __param(0, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String]),
@@ -66,6 +89,7 @@ __decorate([
 ], OrdersController.prototype, "findOne", null);
 __decorate([
     (0, common_1.Patch)(':id/coordinates'),
+    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),
     __param(0, (0, common_1.Param)('id')),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -79,7 +103,7 @@ __decorate([
     __param(0, (0, common_1.UploadedFile)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], OrdersController.prototype, "importExcel", null);
 exports.OrdersController = OrdersController = __decorate([
     (0, common_1.Controller)('orders'),
