@@ -27,6 +27,7 @@ export class OrdersController {
 
   /** GET /api/orders/:id — single order detail */
   @Get(':id')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   findOne(@Param('id') id: string): Promise<Order> {
     return this.ordersService.findById(id);
   }
@@ -37,6 +38,7 @@ export class OrdersController {
    * Blocked if order status is DELIVERED.
    */
   @Patch(':id/coordinates')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   updateCoordinates(
     @Param('id') id: string,
     @Body() dto: UpdateCoordinatesDto,
@@ -51,7 +53,16 @@ export class OrdersController {
   @Post('import-excel')
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   @UseInterceptors(FileInterceptor('file'))
-  importExcel(@UploadedFile() file: Express.Multer.File) {
-    return this.ordersService.importExcel(file);
+  async importExcel(@UploadedFile() file: Express.Multer.File) {
+    try {
+      return await this.ordersService.importExcel(file);
+    } catch (error) {
+      console.error('Import Excel Error:', error);
+      return { 
+        statusCode: 500, 
+        message: error.message, 
+        stack: error.stack 
+      };
+    }
   }
 }

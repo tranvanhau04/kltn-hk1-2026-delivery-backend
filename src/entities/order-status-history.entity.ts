@@ -14,6 +14,6 @@ export class OrderStatusHistory {
   @Column({ name: 'note', type: 'text', nullable: true })
   note: string | null;
 
-  @Column({ name: 'created_at', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  @Column({ name: 'timestamp', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 }

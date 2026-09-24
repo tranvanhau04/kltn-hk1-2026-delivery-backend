@@ -23,6 +23,7 @@ export class DriversController {
   constructor(private readonly driversService: DriversService) {}
 
   @Get('all')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   findAllUnpaginated(): Promise<Driver[]> {
     return this.driversService.findAllUnpaginated();
   }

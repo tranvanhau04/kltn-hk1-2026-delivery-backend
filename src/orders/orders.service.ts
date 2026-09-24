@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, Brackets } from 'typeorm';
 import * as xlsx from 'xlsx';
+import * as crypto from 'crypto';
 import { Order, OrderStatus } from '../entities/order.entity';
 import { Depot } from '../entities/depot.entity';
 import { OrderStatusHistory } from '../entities/order-status-history.entity';
@@ -131,11 +132,10 @@ export class OrdersService {
   /**
    * Helper to generate unique order code: ORD-YYYYMMDD-XXXX
    */
-  private generateOrderCode(index: number): string {
-    const date = new Date();
-    const dateStr = date.toISOString().split('T')[0].replace(/-/g, '');
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    return `ORD-${dateStr}-${randomSuffix}-${index}`;
+  private generateOrderCode(): string {
+    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
+    const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
+    return `ORD-${dateStr}-${randomSuffix}`;
   }
 
   /**
@@ -151,13 +151,13 @@ export class OrdersService {
     const worksheet = workbook.Sheets[sheetName];
     const rows = xlsx.utils.sheet_to_json<any>(worksheet);
 
-    let importedCount = 0;
-    let failedCount = 0;
-    const errors: string[] = [];
-
     const depot = await this.depotRepo.findOne({ where: {} });
     const fallbackLat = depot ? Number(depot.latitude) : DEFAULT_DEPOT_LAT;
     const fallbackLng = depot ? Number(depot.longitude) : DEFAULT_DEPOT_LNG;
+
+    const validRows: { order: Order; history: OrderStatusHistory }[] = [];
+    let failedCount = 0;
+    const errors: string[] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -174,9 +174,8 @@ export class OrdersService {
         }
 
         const order = new Order();
-        const uuidV4 = require('crypto').randomUUID(); // quick uuid
-        order.id = uuidV4;
-        order.code = this.generateOrderCode(i);
+        order.id = crypto.randomUUID();
+        order.code = this.generateOrderCode();
         order.receiverName = String(row.receiver_name);
         order.receiverPhone = phoneStr;
         order.deliveryAddress = String(row.delivery_address);
@@ -198,26 +197,30 @@ export class OrdersService {
         order.latitude = lat;
         order.longitude = lng;
 
-        await this.dataSource.transaction(async (manager) => {
-          await manager.save(Order, order);
-          
-          const history = new OrderStatusHistory();
-          history.orderId = order.id;
-          history.status = OrderStatus.NEW;
-          history.note = 'Import từ file Excel';
-          await manager.save(OrderStatusHistory, history);
-        });
+        const history = new OrderStatusHistory();
+        history.orderId = order.id;
+        history.status = OrderStatus.NEW;
+        history.note = 'Import từ file Excel';
 
-        importedCount++;
+        validRows.push({ order, history });
       } catch (err: any) {
         failedCount++;
         errors.push(err.message);
       }
     }
 
+    if (validRows.length > 0) {
+      await this.dataSource.transaction(async (manager) => {
+        for (const { order, history } of validRows) {
+          await manager.save(Order, order);
+          await manager.save(OrderStatusHistory, history);
+        }
+      });
+    }
+
     return {
       totalRows: rows.length,
-      importedCount,
+      importedCount: validRows.length,
       failedCount,
       errors,
     };
