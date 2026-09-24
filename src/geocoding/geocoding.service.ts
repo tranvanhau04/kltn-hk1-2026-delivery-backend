@@ -51,7 +51,11 @@ export class GeocodingService {
           break;
         }
 
-        const data = (await res.json()) as Array<{ lat: string; lon: string; display_name: string }>;
+        const data = (await res.json()) as Array<{
+          lat: string;
+          lon: string;
+          display_name: string;
+        }>;
 
         if (data && data.length > 0) {
           return {

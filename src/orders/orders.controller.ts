@@ -1,4 +1,14 @@
-import { Controller, Get, Patch, Param, Body, Post, UseInterceptors, UploadedFile, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Param,
+  Body,
+  Post,
+  UseInterceptors,
+  UploadedFile,
+  Query,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { OrdersService } from './orders.service';
 import { UpdateCoordinatesDto } from './dto/update-coordinates.dto';
@@ -39,10 +49,7 @@ export class OrdersController {
    */
   @Patch(':id/coordinates')
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
-  updateCoordinates(
-    @Param('id') id: string,
-    @Body() dto: UpdateCoordinatesDto,
-  ): Promise<Order> {
+  updateCoordinates(@Param('id') id: string, @Body() dto: UpdateCoordinatesDto): Promise<Order> {
     return this.ordersService.updateCoordinates(id, dto);
   }
 
@@ -56,12 +63,12 @@ export class OrdersController {
   async importExcel(@UploadedFile() file: Express.Multer.File) {
     try {
       return await this.ordersService.importExcel(file);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Import Excel Error:', error);
-      return { 
-        statusCode: 500, 
-        message: error.message, 
-        stack: error.stack 
+      return {
+        statusCode: 500,
+        message: (error as Error).message,
+        stack: (error as Error).stack,
       };
     }
   }

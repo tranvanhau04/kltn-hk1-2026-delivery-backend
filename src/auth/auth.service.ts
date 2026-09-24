@@ -163,12 +163,15 @@ export class AuthService {
     // Dispatch email with fallback/mock mechanism
     try {
       await this.mailService.sendPasswordResetEmail(normalizedEmail, otp, resetLink);
-    } catch (error) {
-      console.warn(`[MailService] Failed to send email to ${normalizedEmail}. Error: ${error.message}`);
+    } catch (error: unknown) {
+      console.warn(
+        `[MailService] Failed to send email to ${normalizedEmail}. Error: ${(error as Error).message}`,
+      );
       console.log(`[Mock] Reset link for ${normalizedEmail}: ${resetLink}`);
       return {
         statusCode: 200,
-        message: 'Hướng dẫn khôi phục mật khẩu đã được gửi đến email (đã log ra console ở môi trường dev)',
+        message:
+          'Hướng dẫn khôi phục mật khẩu đã được gửi đến email (đã log ra console ở môi trường dev)',
       };
     }
 
@@ -177,7 +180,8 @@ export class AuthService {
     if (isDev) {
       return {
         statusCode: 200,
-        message: 'Hướng dẫn khôi phục mật khẩu đã được gửi đến email (đã log ra console ở môi trường dev)',
+        message:
+          'Hướng dẫn khôi phục mật khẩu đã được gửi đến email (đã log ra console ở môi trường dev)',
         debugOtp: otp,
         debugResetLink: resetLink,
       };

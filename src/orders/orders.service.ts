@@ -65,7 +65,10 @@ export class OrdersService {
 
   /** Returns orders with status NEW */
   findPool(): Promise<Order[]> {
-    return this.orderRepo.find({ where: { status: OrderStatus.NEW }, order: { createdAt: 'DESC' } });
+    return this.orderRepo.find({
+      where: { status: OrderStatus.NEW },
+      order: { createdAt: 'DESC' },
+    });
   }
 
   /** Returns a single order by ID */
@@ -85,7 +88,7 @@ export class OrdersService {
   async updateCoordinates(id: string, dto: UpdateCoordinatesDto): Promise<Order> {
     const order = await this.findById(id);
 
-    if (order.status === 'DELIVERED') {
+    if (order.status === OrderStatus.DELIVERED) {
       throw new BadRequestException(
         'Không thể thay đổi tọa độ của đơn hàng đã được giao thành công (DELIVERED).',
       );
@@ -149,7 +152,18 @@ export class OrdersService {
     const workbook = xlsx.read(file.buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    const rows = xlsx.utils.sheet_to_json<any>(worksheet);
+    interface ImportRow {
+      receiver_name?: string;
+      receiver_phone?: string | number;
+      delivery_address?: string;
+      weight_kg?: string | number;
+      volume_m3?: string | number;
+      cod_amount?: string | number;
+      zone_id?: string;
+      latitude?: string | number;
+      longitude?: string | number;
+    }
+    const rows = xlsx.utils.sheet_to_json<ImportRow>(worksheet);
 
     const depot = await this.depotRepo.findOne({ where: {} });
     const fallbackLat = depot ? Number(depot.latitude) : DEFAULT_DEPOT_LAT;
@@ -164,8 +178,16 @@ export class OrdersService {
       const rowIndex = i + 2; // Assuming header is row 1
 
       try {
-        if (!row.receiver_name || !row.receiver_phone || !row.delivery_address || !row.weight_kg || !row.volume_m3) {
-          throw new Error(`Dòng ${rowIndex}: Thiếu thông tin bắt buộc (tên, sđt, địa chỉ, khối lượng, thể tích)`);
+        if (
+          !row.receiver_name ||
+          !row.receiver_phone ||
+          !row.delivery_address ||
+          !row.weight_kg ||
+          !row.volume_m3
+        ) {
+          throw new Error(
+            `Dòng ${rowIndex}: Thiếu thông tin bắt buộc (tên, sđt, địa chỉ, khối lượng, thể tích)`,
+          );
         }
 
         const phoneStr = String(row.receiver_phone);
@@ -189,7 +211,11 @@ export class OrdersService {
         let lng = Number(row.longitude);
 
         if (!lat || !lng || lat === 0 || lng === 0) {
-          const geo = await this.geocodingService.geocodeAddress(order.deliveryAddress, fallbackLat, fallbackLng);
+          const geo = await this.geocodingService.geocodeAddress(
+            order.deliveryAddress,
+            fallbackLat,
+            fallbackLng,
+          );
           lat = geo.latitude;
           lng = geo.longitude;
         }
@@ -203,9 +229,9 @@ export class OrdersService {
         history.note = 'Import từ file Excel';
 
         validRows.push({ order, history });
-      } catch (err: any) {
+      } catch (err: unknown) {
         failedCount++;
-        errors.push(err.message);
+        errors.push((err as Error).message);
       }
     }
 
