@@ -1,5 +1,13 @@
 import { Entity, Column, PrimaryColumn } from 'typeorm';
 
+export enum OrderStatus {
+  NEW = 'NEW',
+  ASSIGNED = 'ASSIGNED',
+  IN_TRANSIT = 'IN_TRANSIT',
+  DELIVERED = 'DELIVERED',
+  FAILED = 'FAILED',
+}
+
 @Entity('orders')
 export class Order {
   @PrimaryColumn({ type: 'varchar', length: 36 })
@@ -38,8 +46,8 @@ export class Order {
   @Column({ name: 'cod_amount', type: 'decimal', precision: 12, scale: 2, default: 0 })
   codAmount: number;
 
-  @Column({ name: 'status', type: 'varchar', length: 20, default: 'NEW' })
-  status: string;
+  @Column({ name: 'status', type: 'varchar', length: 20, default: OrderStatus.NEW })
+  status: OrderStatus;
 
   @Column({ name: 'created_at', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;

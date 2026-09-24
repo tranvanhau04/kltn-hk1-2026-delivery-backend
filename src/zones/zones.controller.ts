@@ -53,10 +53,7 @@ export class ZonesController {
    */
   @Post(':id/drivers')
   @HttpCode(HttpStatus.OK)
-  assignDrivers(
-    @Param('id') id: string,
-    @Body() dto: AssignDriversDto,
-  ): Promise<ZoneWithMetrics> {
+  assignDrivers(@Param('id') id: string, @Body() dto: AssignDriversDto): Promise<ZoneWithMetrics> {
     return this.zonesService.assignDrivers(id, dto);
   }
 

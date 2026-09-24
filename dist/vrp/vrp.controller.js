@@ -48,7 +48,7 @@ let VrpController = class VrpController {
         if (!depot)
             throw new Error('No depot found');
         const orders = await this.orderRepo.find({
-            where: dto.orderIds?.length ? { id: (0, typeorm_2.In)(dto.orderIds) } : { status: 'NEW' },
+            where: dto.orderIds?.length ? { id: (0, typeorm_2.In)(dto.orderIds) } : { status: order_entity_1.OrderStatus.NEW },
         });
         const driversRaw = await this.driverRepo.find(dto.driverIds?.length ? { where: { userId: (0, typeorm_2.In)(dto.driverIds) } } : {});
         const userIds = driversRaw.map((d) => d.userId);
@@ -114,7 +114,7 @@ let VrpController = class VrpController {
                     arrivedAt: null,
                 });
                 await this.stopRepo.save(stop);
-                await this.orderRepo.update(s.orderId, { status: 'ASSIGNED' });
+                await this.orderRepo.update(s.orderId, { status: order_entity_1.OrderStatus.ASSIGNED });
             }
         }
         return { message: 'Routes confirmed and dispatched', routeIds };

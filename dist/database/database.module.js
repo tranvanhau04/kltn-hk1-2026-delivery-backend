@@ -19,6 +19,7 @@ const user_entity_1 = require("../entities/user.entity");
 const zone_entity_1 = require("../entities/zone.entity");
 const zone_driver_entity_1 = require("../entities/zone-driver.entity");
 const password_reset_entity_1 = require("../entities/password-reset.entity");
+const order_status_history_entity_1 = require("../entities/order-status-history.entity");
 let DatabaseModule = class DatabaseModule {
 };
 exports.DatabaseModule = DatabaseModule;
@@ -32,7 +33,19 @@ exports.DatabaseModule = DatabaseModule = __decorate([
                 username: 'root',
                 password: 'sapassword',
                 database: 'delivery_db',
-                entities: [depot_entity_1.Depot, order_entity_1.Order, driver_entity_1.Driver, route_entity_1.Route, stop_entity_1.Stop, tracking_log_entity_1.TrackingLog, user_entity_1.User, zone_entity_1.Zone, zone_driver_entity_1.ZoneDriver, password_reset_entity_1.PasswordReset],
+                entities: [
+                    depot_entity_1.Depot,
+                    order_entity_1.Order,
+                    driver_entity_1.Driver,
+                    route_entity_1.Route,
+                    stop_entity_1.Stop,
+                    tracking_log_entity_1.TrackingLog,
+                    user_entity_1.User,
+                    zone_entity_1.Zone,
+                    zone_driver_entity_1.ZoneDriver,
+                    password_reset_entity_1.PasswordReset,
+                    order_status_history_entity_1.OrderStatusHistory,
+                ],
                 synchronize: false,
                 logging: false,
                 charset: 'utf8mb4_unicode_ci',

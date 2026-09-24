@@ -65,12 +65,10 @@ function validateAndParseGeoJson(raw: string): object {
 
   const geo = parsed as { type?: string };
   if (!['Polygon', 'MultiPolygon'].includes(geo.type ?? '')) {
-    throw new BadRequestException(
-      'boundary_geojson phải là GeoJSON Polygon hoặc MultiPolygon.',
-    );
+    throw new BadRequestException('boundary_geojson phải là GeoJSON Polygon hoặc MultiPolygon.');
   }
 
-  return parsed as object;
+  return parsed;
 }
 
 @Injectable()
@@ -136,18 +134,10 @@ export class ZonesService {
 
     // 3. Ratios (prevent division by zero with logistics-safe defaults)
     const weightRatio =
-      fleetCapacityWeight > 0
-        ? demandWeight / fleetCapacityWeight
-        : demandWeight > 0
-        ? 999
-        : 0;
+      fleetCapacityWeight > 0 ? demandWeight / fleetCapacityWeight : demandWeight > 0 ? 999 : 0;
 
     const volumeRatio =
-      fleetCapacityVolume > 0
-        ? demandVolume / fleetCapacityVolume
-        : demandVolume > 0
-        ? 999
-        : 0;
+      fleetCapacityVolume > 0 ? demandVolume / fleetCapacityVolume : demandVolume > 0 ? 999 : 0;
 
     const isOverloaded =
       weightRatio > CRITICAL_RATIO ||
@@ -274,9 +264,7 @@ export class ZonesService {
 
     const assignment = await this.zoneDriverRepo.findOne({ where: { zoneId, driverId } });
     if (!assignment) {
-      throw new ConflictException(
-        `Tài xế ${driverId} chưa được gán vào khu vực ${zoneId}.`,
-      );
+      throw new ConflictException(`Tài xế ${driverId} chưa được gán vào khu vực ${zoneId}.`);
     }
 
     await this.zoneDriverRepo.remove(assignment);
@@ -295,7 +283,7 @@ export class ZonesService {
 
     const assignments = await this.zoneDriverRepo.find({ where: { zoneId } });
     if (assignments.length === 0) return [];
-    
+
     const driverIds = assignments.map((a) => a.driverId);
     return this.driverRepo.find({ where: { userId: In(driverIds) } });
   }

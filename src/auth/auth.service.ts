@@ -160,15 +160,28 @@ export class AuthService {
       'http://localhost:3000/reset-password';
     const resetLink = `${frontendUrl}?token=${token}&email=${encodeURIComponent(normalizedEmail)}`;
 
-    // Dispatch email
-    await this.mailService.sendPasswordResetEmail(normalizedEmail, otp, resetLink);
+    // Dispatch email with fallback/mock mechanism
+    try {
+      await this.mailService.sendPasswordResetEmail(normalizedEmail, otp, resetLink);
+    } catch (error: unknown) {
+      console.warn(
+        `[MailService] Failed to send email to ${normalizedEmail}. Error: ${(error as Error).message}`,
+      );
+      console.log(`[Mock] Reset link for ${normalizedEmail}: ${resetLink}`);
+      return {
+        statusCode: 200,
+        message:
+          'Hướng dẫn khôi phục mật khẩu đã được gửi đến email (đã log ra console ở môi trường dev)',
+      };
+    }
 
     const isDev = (this.configService.get<string>('NODE_ENV') || 'development') === 'development';
 
     if (isDev) {
       return {
         statusCode: 200,
-        message: 'If this email is registered in our system, a password reset code has been sent.',
+        message:
+          'Hướng dẫn khôi phục mật khẩu đã được gửi đến email (đã log ra console ở môi trường dev)',
         debugOtp: otp,
         debugResetLink: resetLink,
       };

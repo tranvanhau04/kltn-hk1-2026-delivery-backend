@@ -2,7 +2,7 @@ import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { VrpService, VrpSolutionResult } from './vrp.service';
-import { Order } from '../entities/order.entity';
+import { Order, OrderStatus } from '../entities/order.entity';
 import { Driver } from '../entities/driver.entity';
 import { Depot } from '../entities/depot.entity';
 import { Route } from '../entities/route.entity';
@@ -58,7 +58,7 @@ export class VrpController {
 
     // Load orders
     const orders = await this.orderRepo.find({
-      where: dto.orderIds?.length ? { id: In(dto.orderIds) } : { status: 'NEW' },
+      where: dto.orderIds?.length ? { id: In(dto.orderIds) } : { status: OrderStatus.NEW },
     });
 
     // Load drivers with user info
@@ -147,7 +147,7 @@ export class VrpController {
         await this.stopRepo.save(stop);
 
         // Update order status to ASSIGNED
-        await this.orderRepo.update(s.orderId, { status: 'ASSIGNED' });
+        await this.orderRepo.update(s.orderId, { status: OrderStatus.ASSIGNED });
       }
     }
 

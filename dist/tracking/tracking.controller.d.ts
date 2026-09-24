@@ -73,7 +73,7 @@ export declare class TrackingController {
                 lat: number;
                 lng: number;
                 codAmount: number;
-                status: string;
+                status: import("../entities/order.entity").OrderStatus;
             } | null;
         }[];
         message?: undefined;

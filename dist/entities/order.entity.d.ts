@@ -1,3 +1,10 @@
+export declare enum OrderStatus {
+    NEW = "NEW",
+    ASSIGNED = "ASSIGNED",
+    IN_TRANSIT = "IN_TRANSIT",
+    DELIVERED = "DELIVERED",
+    FAILED = "FAILED"
+}
 export declare class Order {
     id: string;
     code: string;
@@ -11,7 +18,7 @@ export declare class Order {
     weightKg: number;
     volumeM3: number;
     codAmount: number;
-    status: string;
+    status: OrderStatus;
     createdAt: Date;
     updatedAt: Date;
 }
