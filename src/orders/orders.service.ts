@@ -93,7 +93,6 @@ export class OrdersService {
     order.volumeM3 = dto.volumeM3 ?? 0;
     order.codAmount = dto.codAmount ?? 0;
     order.zoneId = dto.zoneId ?? null;
-    order.notes = dto.notes ?? null;
     order.status = OrderStatus.NEW;
 
     let lat = dto.latitude;
