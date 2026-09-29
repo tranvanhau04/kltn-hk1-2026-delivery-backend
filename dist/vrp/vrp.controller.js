@@ -11,48 +11,52 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
+var VrpController_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.VrpController = void 0;
 const common_1 = require("@nestjs/common");
 const typeorm_1 = require("@nestjs/typeorm");
 const typeorm_2 = require("typeorm");
 const vrp_service_1 = require("./vrp.service");
+const routes_service_1 = require("../routes/routes.service");
 const order_entity_1 = require("../entities/order.entity");
 const driver_entity_1 = require("../entities/driver.entity");
 const depot_entity_1 = require("../entities/depot.entity");
-const route_entity_1 = require("../entities/route.entity");
-const stop_entity_1 = require("../entities/stop.entity");
 const user_entity_1 = require("../entities/user.entity");
-const uuid_1 = require("uuid");
-let VrpController = class VrpController {
+const roles_decorator_1 = require("../auth/decorators/roles.decorator");
+const current_user_decorator_1 = require("../auth/decorators/current-user.decorator");
+let VrpController = VrpController_1 = class VrpController {
     vrpService;
+    routesService;
     orderRepo;
     driverRepo;
     depotRepo;
-    routeRepo;
-    stopRepo;
     userRepo;
-    constructor(vrpService, orderRepo, driverRepo, depotRepo, routeRepo, stopRepo, userRepo) {
+    logger = new common_1.Logger(VrpController_1.name);
+    constructor(vrpService, routesService, orderRepo, driverRepo, depotRepo, userRepo) {
         this.vrpService = vrpService;
+        this.routesService = routesService;
         this.orderRepo = orderRepo;
         this.driverRepo = driverRepo;
         this.depotRepo = depotRepo;
-        this.routeRepo = routeRepo;
-        this.stopRepo = stopRepo;
         this.userRepo = userRepo;
     }
-    async optimize(dto) {
+    async optimize(dto, user) {
         const depot = dto.depotId
             ? await this.depotRepo.findOneOrFail({ where: { id: dto.depotId } })
             : await this.depotRepo.findOne({ where: {} });
         if (!depot)
-            throw new Error('No depot found');
+            throw new Error('No depot configured');
         const orders = await this.orderRepo.find({
-            where: dto.orderIds?.length ? { id: (0, typeorm_2.In)(dto.orderIds) } : { status: order_entity_1.OrderStatus.NEW },
+            where: dto.orderIds?.length
+                ? { id: (0, typeorm_2.In)(dto.orderIds) }
+                : { status: order_entity_1.OrderStatus.NEW },
         });
         const driversRaw = await this.driverRepo.find(dto.driverIds?.length ? { where: { userId: (0, typeorm_2.In)(dto.driverIds) } } : {});
         const userIds = driversRaw.map((d) => d.userId);
-        const users = userIds.length ? await this.userRepo.find({ where: { id: (0, typeorm_2.In)(userIds) } }) : [];
+        const users = userIds.length
+            ? await this.userRepo.find({ where: { id: (0, typeorm_2.In)(userIds) } })
+            : [];
         const userMap = new Map(users.map((u) => [u.id, u]));
         const drivers = driversRaw
             .filter((d) => d.currentShiftStatus !== 'OFFLINE')
@@ -68,7 +72,8 @@ let VrpController = class VrpController {
                 maxVolumeM3: Number(d.maxVolumeM3),
             };
         });
-        return await this.vrpService.solve({
+        this.logger.log(`Optimize request: dispatcher=${user?.sub}, orders=${orders.length}, drivers=${drivers.length}`);
+        return this.vrpService.solve({
             id: depot.id,
             name: depot.name,
             latitude: Number(depot.latitude),
@@ -84,70 +89,64 @@ let VrpController = class VrpController {
             weightKg: Number(o.weightKg),
             volumeM3: Number(o.volumeM3),
             codAmount: Number(o.codAmount),
+            timeWindowStart: o.timeWindowStart ?? undefined,
+            timeWindowEnd: o.timeWindowEnd ?? undefined,
         })), drivers);
     }
-    async confirm(dto) {
-        const today = new Date().toISOString().split('T')[0];
-        const routeIds = [];
-        for (const r of dto.routes) {
-            const routeId = (0, uuid_1.v4)();
-            routeIds.push(routeId);
-            const polylineJson = JSON.stringify(r.polyline);
-            const route = this.routeRepo.create({
-                id: routeId,
-                depotId: r.depotId,
-                driverId: r.driverId,
-                routeDate: today,
-                totalDistanceKm: r.totalDistanceKm,
-                totalEstimatedTimeMin: r.totalEstimatedTimeMin,
-                status: 'PLANNED',
-                polyline: polylineJson,
-            });
-            await this.routeRepo.save(route);
-            for (const s of r.stops) {
-                const stop = this.stopRepo.create({
-                    id: (0, uuid_1.v4)(),
-                    routeId,
-                    orderId: s.orderId,
-                    sequenceNo: s.sequenceNo,
-                    status: 'PENDING',
-                    arrivedAt: null,
-                });
-                await this.stopRepo.save(stop);
-                await this.orderRepo.update(s.orderId, { status: order_entity_1.OrderStatus.ASSIGNED });
-            }
-        }
-        return { message: 'Routes confirmed and dispatched', routeIds };
+    async confirm(dto, user) {
+        this.logger.log(`Confirm request: dispatcher=${user?.sub}, routes=${dto.routes?.length ?? 0}`);
+        return this.routesService.confirmRoutes(dto, user?.sub);
+    }
+    async listRoutes(query) {
+        return this.routesService.findAll(query);
+    }
+    async getRoute(id) {
+        return this.routesService.findById(id);
     }
 };
 exports.VrpController = VrpController;
 __decorate([
     (0, common_1.Post)('optimize'),
     (0, common_1.HttpCode)(common_1.HttpStatus.OK),
+    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.DISPATCHER, user_entity_1.UserRole.ADMIN),
     __param(0, (0, common_1.Body)()),
+    __param(1, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], VrpController.prototype, "optimize", null);
 __decorate([
     (0, common_1.Post)('confirm'),
     (0, common_1.HttpCode)(common_1.HttpStatus.OK),
+    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.DISPATCHER, user_entity_1.UserRole.ADMIN),
     __param(0, (0, common_1.Body)()),
+    __param(1, (0, current_user_decorator_1.CurrentUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], VrpController.prototype, "confirm", null);
+__decorate([
+    (0, common_1.Get)('routes'),
+    __param(0, (0, common_1.Query)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
-], VrpController.prototype, "confirm", null);
-exports.VrpController = VrpController = __decorate([
+], VrpController.prototype, "listRoutes", null);
+__decorate([
+    (0, common_1.Get)('routes/:id'),
+    __param(0, (0, common_1.Param)('id', new common_1.ParseUUIDPipe({ version: '4', optional: true }))),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], VrpController.prototype, "getRoute", null);
+exports.VrpController = VrpController = VrpController_1 = __decorate([
     (0, common_1.Controller)('vrp'),
-    __param(1, (0, typeorm_1.InjectRepository)(order_entity_1.Order)),
-    __param(2, (0, typeorm_1.InjectRepository)(driver_entity_1.Driver)),
-    __param(3, (0, typeorm_1.InjectRepository)(depot_entity_1.Depot)),
-    __param(4, (0, typeorm_1.InjectRepository)(route_entity_1.Route)),
-    __param(5, (0, typeorm_1.InjectRepository)(stop_entity_1.Stop)),
-    __param(6, (0, typeorm_1.InjectRepository)(user_entity_1.User)),
+    __param(2, (0, typeorm_1.InjectRepository)(order_entity_1.Order)),
+    __param(3, (0, typeorm_1.InjectRepository)(driver_entity_1.Driver)),
+    __param(4, (0, typeorm_1.InjectRepository)(depot_entity_1.Depot)),
+    __param(5, (0, typeorm_1.InjectRepository)(user_entity_1.User)),
     __metadata("design:paramtypes", [vrp_service_1.VrpService,
-        typeorm_2.Repository,
-        typeorm_2.Repository,
+        routes_service_1.RoutesService,
         typeorm_2.Repository,
         typeorm_2.Repository,
         typeorm_2.Repository,

@@ -16,6 +16,7 @@ const database_module_1 = require("./database/database.module");
 const depots_module_1 = require("./depots/depots.module");
 const orders_module_1 = require("./orders/orders.module");
 const vrp_module_1 = require("./vrp/vrp.module");
+const routes_module_1 = require("./routes/routes.module");
 const tracking_module_1 = require("./tracking/tracking.module");
 const zones_module_1 = require("./zones/zones.module");
 const drivers_module_1 = require("./drivers/drivers.module");
@@ -38,6 +39,7 @@ exports.AppModule = AppModule = __decorate([
             depots_module_1.DepotsModule,
             orders_module_1.OrdersModule,
             vrp_module_1.VrpModule,
+            routes_module_1.RoutesModule,
             tracking_module_1.TrackingModule,
             zones_module_1.ZonesModule,
             drivers_module_1.DriversModule,

@@ -7,6 +7,7 @@ import { DatabaseModule } from './database/database.module';
 import { DepotsModule } from './depots/depots.module';
 import { OrdersModule } from './orders/orders.module';
 import { VrpModule } from './vrp/vrp.module';
+import { RoutesModule } from './routes/routes.module';
 import { TrackingModule } from './tracking/tracking.module';
 import { ZonesModule } from './zones/zones.module';
 import { DriversModule } from './drivers/drivers.module';
@@ -26,6 +27,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     DepotsModule,
     OrdersModule,
     VrpModule,
+    RoutesModule,
     TrackingModule,
     ZonesModule,
     DriversModule,
