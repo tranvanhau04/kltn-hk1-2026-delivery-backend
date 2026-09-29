@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { VrpService, VrpSolutionResult } from './vrp.service';
@@ -14,6 +14,8 @@ interface OptimizeDto {
   depotId?: string;
   orderIds: string[];
   driverIds?: string[];
+  /** Optional: minutes-from-midnight to override default departure time */
+  departureMins?: number;
 }
 
 interface ConfirmRouteDto {
@@ -27,6 +29,8 @@ interface ConfirmRouteDto {
   }>;
   totalDistanceKm: number;
   totalEstimatedTimeMin: number;
+  totalVolumeM3?: number;
+  totalWeightKg?: number;
   polyline: [number, number][];
 }
 
@@ -36,6 +40,8 @@ interface ConfirmDto {
 
 @Controller('vrp')
 export class VrpController {
+  private readonly logger = new Logger(VrpController.name);
+
   constructor(
     private readonly vrpService: VrpService,
     @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
@@ -86,7 +92,11 @@ export class VrpController {
         };
       });
 
-    return await this.vrpService.solve(
+    this.logger.log(
+      `VRP optimize request: depotId=${depot.id}, orders=${orders.length}, drivers=${drivers.length}`,
+    );
+
+    return this.vrpService.solve(
       {
         id: depot.id,
         name: depot.name,
@@ -104,6 +114,9 @@ export class VrpController {
         weightKg: Number(o.weightKg),
         volumeM3: Number(o.volumeM3),
         codAmount: Number(o.codAmount),
+        // Time windows: stored as minutes-from-midnight if provided by order extension
+        timeWindowStart: (o as any).timeWindowStart ?? undefined,
+        timeWindowEnd: (o as any).timeWindowEnd ?? undefined,
       })),
       drivers,
     );
