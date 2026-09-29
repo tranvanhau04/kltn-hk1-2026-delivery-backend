@@ -72,9 +72,7 @@ export class VrpController {
     if (!depot) throw new Error('No depot configured');
 
     const orders = await this.orderRepo.find({
-      where: dto.orderIds?.length
-        ? { id: In(dto.orderIds) }
-        : { status: OrderStatus.NEW },
+      where: dto.orderIds?.length ? { id: In(dto.orderIds) } : { status: OrderStatus.NEW },
     });
 
     const driversRaw = await this.driverRepo.find(
@@ -82,9 +80,7 @@ export class VrpController {
     );
 
     const userIds = driversRaw.map((d) => d.userId);
-    const users = userIds.length
-      ? await this.userRepo.find({ where: { id: In(userIds) } })
-      : [];
+    const users = userIds.length ? await this.userRepo.find({ where: { id: In(userIds) } }) : [];
     const userMap = new Map(users.map((u) => [u.id, u]));
 
     const drivers = driversRaw
@@ -124,8 +120,9 @@ export class VrpController {
         weightKg: Number(o.weightKg),
         volumeM3: Number(o.volumeM3),
         codAmount: Number(o.codAmount),
-        timeWindowStart: (o as any).timeWindowStart ?? undefined,
-        timeWindowEnd: (o as any).timeWindowEnd ?? undefined,
+        timeWindowStart:
+          (o as unknown as { timeWindowStart?: number }).timeWindowStart ?? undefined,
+        timeWindowEnd: (o as unknown as { timeWindowEnd?: number }).timeWindowEnd ?? undefined,
       })),
       drivers,
     );
@@ -140,13 +137,8 @@ export class VrpController {
   @Post('confirm')
   @HttpCode(HttpStatus.OK)
   @Roles(UserRole.DISPATCHER, UserRole.ADMIN)
-  async confirm(
-    @Body() dto: ConfirmRoutesDto,
-    @CurrentUser() user: JwtPayload,
-  ) {
-    this.logger.log(
-      `Confirm request: dispatcher=${user?.sub}, routes=${dto.routes?.length ?? 0}`,
-    );
+  async confirm(@Body() dto: ConfirmRoutesDto, @CurrentUser() user: JwtPayload) {
+    this.logger.log(`Confirm request: dispatcher=${user?.sub}, routes=${dto.routes?.length ?? 0}`);
     return this.routesService.confirmRoutes(dto, user?.sub);
   }
 
@@ -164,9 +156,7 @@ export class VrpController {
    * Get route detail (proxy to RoutesService).
    */
   @Get('routes/:id')
-  async getRoute(
-    @Param('id', new ParseUUIDPipe({ version: '4', optional: true })) id: string,
-  ) {
+  async getRoute(@Param('id', new ParseUUIDPipe({ version: '4', optional: true })) id: string) {
     return this.routesService.findById(id);
   }
 }

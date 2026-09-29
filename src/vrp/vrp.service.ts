@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -208,10 +208,10 @@ interface CostMatrix {
   durMin: (i: number, j: number) => number;
 }
 
-async function buildCostMatrix(
+function buildCostMatrix(
   nodes: Array<{ lat: number; lng: number }>,
   osrmMatrix: { distances: number[][]; durations: number[][] } | null,
-): Promise<CostMatrix> {
+): CostMatrix {
   return {
     distKm: (i, j) => {
       if (osrmMatrix?.distances?.[i]?.[j] !== undefined) {
@@ -231,11 +231,7 @@ async function buildCostMatrix(
 
 // ─── 2-opt Local Search ───────────────────────────────────────────────────────
 
-function twoOptImprove(
-  stopIndices: number[],
-  costMatrix: CostMatrix,
-  depotIdx: number,
-): number[] {
+function twoOptImprove(stopIndices: number[], costMatrix: CostMatrix, depotIdx: number): number[] {
   if (stopIndices.length <= 2) return stopIndices;
   let tour = [depotIdx, ...stopIndices, depotIdx];
   let improved = true;
@@ -252,11 +248,7 @@ function twoOptImprove(
           costMatrix.distKm(tour[i - 1], tour[k]) +
           costMatrix.distKm(tour[i], tour[k + 1]);
         if (delta < -0.001) {
-          tour = [
-            ...tour.slice(0, i),
-            ...tour.slice(i, k + 1).reverse(),
-            ...tour.slice(k + 1),
-          ];
+          tour = [...tour.slice(0, i), ...tour.slice(i, k + 1).reverse(), ...tour.slice(k + 1)];
           improved = true;
         }
       }
@@ -365,10 +357,12 @@ export class VrpService {
         this.logger.warn('OSRM table unavailable – using Haversine fallback');
       }
     } else {
-      this.logger.warn(`${nodes.length} nodes exceeds OSRM limit (${OSRM_MAX_COORDS}) – using Haversine`);
+      this.logger.warn(
+        `${nodes.length} nodes exceeds OSRM limit (${OSRM_MAX_COORDS}) – using Haversine`,
+      );
     }
 
-    const costMatrix = await buildCostMatrix(nodes, osrmMatrix);
+    const costMatrix = buildCostMatrix(nodes, osrmMatrix);
     const unassignedSet = new Set<number>(orders.map((_, i) => i));
     const routes: VrpRouteResult[] = [];
 
@@ -457,8 +451,10 @@ export class VrpService {
         for (let i = 0; i < fallbackNodes.length - 1; i++) {
           totalDist +=
             haversine(
-              fallbackNodes[i].lat, fallbackNodes[i].lng,
-              fallbackNodes[i + 1].lat, fallbackNodes[i + 1].lng,
+              fallbackNodes[i].lat,
+              fallbackNodes[i].lng,
+              fallbackNodes[i + 1].lat,
+              fallbackNodes[i + 1].lng,
             ) * 1.35;
         }
         totalTime = Math.round((totalDist / 25) * 60 + routeOrders.length * SERVICE_TIME_MIN);

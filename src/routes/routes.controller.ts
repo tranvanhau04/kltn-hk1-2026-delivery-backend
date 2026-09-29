@@ -62,10 +62,7 @@ export class RoutesController {
   @Post('confirm')
   @HttpCode(HttpStatus.OK)
   @Roles(UserRole.DISPATCHER, UserRole.ADMIN)
-  async confirm(
-    @Body() dto: ConfirmRoutesDto,
-    @CurrentUser() user: JwtPayload,
-  ) {
+  async confirm(@Body() dto: ConfirmRoutesDto, @CurrentUser() user: JwtPayload) {
     this.logger.log(
       `POST /routes/confirm by dispatcher=${user?.sub}, routes=${dto.routes?.length ?? 0}`,
     );

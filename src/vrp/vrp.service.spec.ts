@@ -38,11 +38,7 @@ function makeOrder(
   };
 }
 
-function makeDriver(
-  id: string,
-  maxWeightKg: number,
-  maxVolumeM3: number,
-): VrpDriver {
+function makeDriver(id: string, maxWeightKg: number, maxVolumeM3: number): VrpDriver {
   return {
     userId: id,
     fullName: `Driver ${id}`,
@@ -56,18 +52,18 @@ function makeDriver(
 
 // Scatter orders around Ho Chi Minh City area
 const HCM_ORDERS: VrpOrder[] = [
-  makeOrder('o1', 10.762622, 106.660172, 5, 0.01),   // District 1
-  makeOrder('o2', 10.823099, 106.629664, 3, 0.005),  // Go Vap
-  makeOrder('o3', 10.801843, 106.648673, 4, 0.008),  // Binh Thanh
-  makeOrder('o4', 10.849050, 106.752000, 6, 0.012),  // Thu Duc
-  makeOrder('o5', 10.728910, 106.696270, 2, 0.003),  // District 4
-  makeOrder('o6', 10.856000, 106.628000, 3, 0.006),  // Go Vap North
-  makeOrder('o7', 10.790000, 106.620000, 5, 0.010),  // Tan Binh
-  makeOrder('o8', 10.760000, 106.700000, 4, 0.007),  // District 2
-  makeOrder('o9', 10.730000, 106.720000, 3, 0.005),  // District 7
-  makeOrder('o10', 10.800000, 106.680000, 2, 0.004), // Binh Thanh East
-  makeOrder('o11', 10.870000, 106.700000, 7, 0.015), // Thu Duc North
-  makeOrder('o12', 10.740000, 106.660000, 4, 0.009), // District 8
+  makeOrder('o1', 10.762622, 106.660172, 5, 0.01), // District 1
+  makeOrder('o2', 10.823099, 106.629664, 3, 0.005), // Go Vap
+  makeOrder('o3', 10.801843, 106.648673, 4, 0.008), // Binh Thanh
+  makeOrder('o4', 10.84905, 106.752, 6, 0.012), // Thu Duc
+  makeOrder('o5', 10.72891, 106.69627, 2, 0.003), // District 4
+  makeOrder('o6', 10.856, 106.628, 3, 0.006), // Go Vap North
+  makeOrder('o7', 10.79, 106.62, 5, 0.01), // Tan Binh
+  makeOrder('o8', 10.76, 106.7, 4, 0.007), // District 2
+  makeOrder('o9', 10.73, 106.72, 3, 0.005), // District 7
+  makeOrder('o10', 10.8, 106.68, 2, 0.004), // Binh Thanh East
+  makeOrder('o11', 10.87, 106.7, 7, 0.015), // Thu Duc North
+  makeOrder('o12', 10.74, 106.66, 4, 0.009), // District 8
 ];
 
 const DRIVERS: VrpDriver[] = [
@@ -113,10 +109,7 @@ describe('VrpService', () => {
 
     it('should assign all orders within capacity to available drivers', async () => {
       // Use 3 generous drivers that can take all 12 orders
-      const bigDrivers: VrpDriver[] = [
-        makeDriver('big1', 100, 1.0),
-        makeDriver('big2', 100, 1.0),
-      ];
+      const bigDrivers: VrpDriver[] = [makeDriver('big1', 100, 1.0), makeDriver('big2', 100, 1.0)];
       const result: VrpSolutionResult = await service.solve(DEPOT, HCM_ORDERS, bigDrivers);
 
       const assignedCount = result.routes.reduce((s, r) => s + r.stops.length, 0);
@@ -235,8 +228,14 @@ describe('VrpService', () => {
     it('should compute arrivalTimes within valid time windows', async () => {
       // Orders with generous 07:00 - 20:00 windows (420 - 1200 min)
       const ordersWithTW: VrpOrder[] = [
-        makeOrder('tw1', 10.840, 106.650, 3, 0.005, { timeWindowStart: 7 * 60, timeWindowEnd: 20 * 60 }),
-        makeOrder('tw2', 10.835, 106.645, 2, 0.004, { timeWindowStart: 8 * 60, timeWindowEnd: 20 * 60 }),
+        makeOrder('tw1', 10.84, 106.65, 3, 0.005, {
+          timeWindowStart: 7 * 60,
+          timeWindowEnd: 20 * 60,
+        }),
+        makeOrder('tw2', 10.835, 106.645, 2, 0.004, {
+          timeWindowStart: 8 * 60,
+          timeWindowEnd: 20 * 60,
+        }),
       ];
       const result = await service.solve(DEPOT, ordersWithTW, [makeDriver('dtw', 50, 1.0)]);
       // Should be assigned since windows are wide

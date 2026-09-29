@@ -11,10 +11,7 @@ import { Depot } from '../entities/depot.entity';
 import { User } from '../entities/user.entity';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Order, Driver, Depot, User]),
-    RoutesModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Order, Driver, Depot, User]), RoutesModule],
   controllers: [VrpController],
   providers: [VrpService, GraphService, MaxFlowService],
 })

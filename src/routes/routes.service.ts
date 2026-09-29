@@ -1,4 +1,4 @@
-﻿import {
+import {
   Injectable,
   Logger,
   BadRequestException,
@@ -100,10 +100,7 @@ export class RoutesService {
    * @param dto - The confirm payload
    * @param dispatcherId - JWT sub (user id) of the dispatcher performing the confirm
    */
-  async confirmRoutes(
-    dto: ConfirmRoutesDto,
-    dispatcherId?: string,
-  ): Promise<ConfirmRoutesResult> {
+  async confirmRoutes(dto: ConfirmRoutesDto, dispatcherId?: string): Promise<ConfirmRoutesResult> {
     if (!dto.routes || dto.routes.length === 0) {
       throw new BadRequestException('No routes provided to confirm');
     }
@@ -124,9 +121,7 @@ export class RoutesService {
       const dups = Object.entries(counts)
         .filter(([, c]) => c > 1)
         .map(([id]) => id);
-      throw new ConflictException(
-        `Duplicate order IDs across routes: ${dups.join(', ')}`,
-      );
+      throw new ConflictException(`Duplicate order IDs across routes: ${dups.join(', ')}`);
     }
 
     const existingOrders = await this.orderRepo.find({
@@ -137,19 +132,13 @@ export class RoutesService {
     // Check for missing order IDs
     const missingIds = uniqueOrderIds.filter((id) => !orderMap.has(id));
     if (missingIds.length > 0) {
-      throw new NotFoundException(
-        `Order IDs not found: ${missingIds.join(', ')}`,
-      );
+      throw new NotFoundException(`Order IDs not found: ${missingIds.join(', ')}`);
     }
 
     // Check for orders already assigned
-    const alreadyAssigned = existingOrders.filter(
-      (o) => o.status !== OrderStatus.NEW,
-    );
+    const alreadyAssigned = existingOrders.filter((o) => o.status !== OrderStatus.NEW);
     if (alreadyAssigned.length > 0) {
-      const summary = alreadyAssigned
-        .map((o) => `${o.code} (${o.status})`)
-        .join(', ');
+      const summary = alreadyAssigned.map((o) => `${o.code} (${o.status})`).join(', ');
       throw new ConflictException(
         `These orders are not in NEW status and cannot be re-assigned: ${summary}`,
       );
@@ -252,9 +241,7 @@ export class RoutesService {
       );
     } catch (err) {
       await queryRunner.rollbackTransaction();
-      this.logger.error(
-        `Route confirmation ROLLED BACK: ${(err as Error).message}`,
-      );
+      this.logger.error(`Route confirmation ROLLED BACK: ${(err as Error).message}`);
       throw err;
     } finally {
       await queryRunner.release();
@@ -303,7 +290,11 @@ export class RoutesService {
 
         let polyline: [number, number][] = [];
         if (route.polyline) {
-          try { polyline = JSON.parse(route.polyline); } catch { polyline = []; }
+          try {
+            polyline = JSON.parse(route.polyline) as [number, number][];
+          } catch {
+            polyline = [];
+          }
         }
 
         return {
@@ -344,7 +335,11 @@ export class RoutesService {
 
     let polyline: [number, number][] = [];
     if (route.polyline) {
-      try { polyline = JSON.parse(route.polyline); } catch { polyline = []; }
+      try {
+        polyline = JSON.parse(route.polyline) as [number, number][];
+      } catch {
+        polyline = [];
+      }
     }
 
     return {

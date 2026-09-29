@@ -12,15 +12,7 @@ import { OrderStatusHistory } from '../entities/order-status-history.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      Route,
-      Stop,
-      Order,
-      Driver,
-      Depot,
-      User,
-      OrderStatusHistory,
-    ]),
+    TypeOrmModule.forFeature([Route, Stop, Order, Driver, Depot, User, OrderStatusHistory]),
   ],
   controllers: [RoutesController],
   providers: [RoutesService],

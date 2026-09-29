@@ -1,4 +1,4 @@
-﻿/**
+/**
  * RoutesService Unit Tests — Task 6.2
  * Tests transactional route confirmation logic using TypeORM QueryRunner mocks.
  * No real DB connections — all repositories and DataSource are mocked.
@@ -108,7 +108,7 @@ describe('RoutesService', () => {
 
   beforeEach(async () => {
     mockQueryRunner = buildQueryRunnerMock();
-    (mockDataSource.createQueryRunner as jest.Mock).mockReturnValue(mockQueryRunner);
+    mockDataSource.createQueryRunner.mockReturnValue(mockQueryRunner);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -128,7 +128,7 @@ describe('RoutesService', () => {
 
     // Reset all mocks between tests
     jest.clearAllMocks();
-    (mockDataSource.createQueryRunner as jest.Mock).mockReturnValue(mockQueryRunner);
+    mockDataSource.createQueryRunner.mockReturnValue(mockQueryRunner);
   });
 
   // ─── confirmRoutes() ───────────────────────────────────────────────────────
@@ -143,7 +143,10 @@ describe('RoutesService', () => {
           totalEstimatedTimeMin: 90,
           totalWeightKg: 10,
           totalVolumeM3: 0.02,
-          polyline: [[10.84, 106.67], [10.76, 106.66]],
+          polyline: [
+            [10.84, 106.67],
+            [10.76, 106.66],
+          ],
           stops: [
             { orderId: 'order-1', sequenceNo: 1, estimatedArrivalMin: 462 },
             { orderId: 'order-2', sequenceNo: 2, estimatedArrivalMin: 490 },
@@ -153,9 +156,7 @@ describe('RoutesService', () => {
     };
 
     it('should throw BadRequestException when no routes provided', async () => {
-      await expect(service.confirmRoutes({ routes: [] })).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.confirmRoutes({ routes: [] })).rejects.toThrow(BadRequestException);
     });
 
     it('should throw NotFoundException when order IDs do not exist', async () => {
@@ -198,20 +199,14 @@ describe('RoutesService', () => {
     });
 
     it('should throw NotFoundException when depot does not exist', async () => {
-      mockOrderRepo.find.mockResolvedValue([
-        makeMockOrder('order-1'),
-        makeMockOrder('order-2'),
-      ]);
+      mockOrderRepo.find.mockResolvedValue([makeMockOrder('order-1'), makeMockOrder('order-2')]);
       mockDepotRepo.findOne.mockResolvedValue(null); // Depot not found
 
       await expect(service.confirmRoutes(validDto)).rejects.toThrow(NotFoundException);
     });
 
     it('should throw NotFoundException when driver does not exist', async () => {
-      mockOrderRepo.find.mockResolvedValue([
-        makeMockOrder('order-1'),
-        makeMockOrder('order-2'),
-      ]);
+      mockOrderRepo.find.mockResolvedValue([makeMockOrder('order-1'), makeMockOrder('order-2')]);
       mockDepotRepo.findOne.mockResolvedValue(makeMockDepot());
       mockDriverRepo.findOne.mockResolvedValue(null); // Driver not found
 
@@ -219,10 +214,7 @@ describe('RoutesService', () => {
     });
 
     it('should successfully confirm routes and return routeIds', async () => {
-      mockOrderRepo.find.mockResolvedValue([
-        makeMockOrder('order-1'),
-        makeMockOrder('order-2'),
-      ]);
+      mockOrderRepo.find.mockResolvedValue([makeMockOrder('order-1'), makeMockOrder('order-2')]);
       mockDepotRepo.findOne.mockResolvedValue(makeMockDepot());
       mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
       mockQueryRunner.manager.findOne.mockResolvedValue(makeMockUser());
@@ -237,10 +229,7 @@ describe('RoutesService', () => {
     });
 
     it('should call commitTransaction on success', async () => {
-      mockOrderRepo.find.mockResolvedValue([
-        makeMockOrder('order-1'),
-        makeMockOrder('order-2'),
-      ]);
+      mockOrderRepo.find.mockResolvedValue([makeMockOrder('order-1'), makeMockOrder('order-2')]);
       mockDepotRepo.findOne.mockResolvedValue(makeMockDepot());
       mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
       mockQueryRunner.manager.findOne.mockResolvedValue(makeMockUser());
@@ -252,10 +241,7 @@ describe('RoutesService', () => {
     });
 
     it('should call rollbackTransaction and release queryRunner on failure', async () => {
-      mockOrderRepo.find.mockResolvedValue([
-        makeMockOrder('order-1'),
-        makeMockOrder('order-2'),
-      ]);
+      mockOrderRepo.find.mockResolvedValue([makeMockOrder('order-1'), makeMockOrder('order-2')]);
       mockDepotRepo.findOne.mockResolvedValue(makeMockDepot());
       mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
 
@@ -270,10 +256,7 @@ describe('RoutesService', () => {
     });
 
     it('should always release queryRunner even when rollback fails', async () => {
-      mockOrderRepo.find.mockResolvedValue([
-        makeMockOrder('order-1'),
-        makeMockOrder('order-2'),
-      ]);
+      mockOrderRepo.find.mockResolvedValue([makeMockOrder('order-1'), makeMockOrder('order-2')]);
       mockDepotRepo.findOne.mockResolvedValue(makeMockDepot());
       mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
       mockQueryRunner.manager.insert.mockRejectedValue(new Error('insert error'));
@@ -285,10 +268,7 @@ describe('RoutesService', () => {
     });
 
     it('should call manager.insert for route, stops, and order history', async () => {
-      mockOrderRepo.find.mockResolvedValue([
-        makeMockOrder('order-1'),
-        makeMockOrder('order-2'),
-      ]);
+      mockOrderRepo.find.mockResolvedValue([makeMockOrder('order-1'), makeMockOrder('order-2')]);
       mockDepotRepo.findOne.mockResolvedValue(makeMockDepot());
       mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
       mockQueryRunner.manager.findOne.mockResolvedValue(makeMockUser());
@@ -300,10 +280,7 @@ describe('RoutesService', () => {
     });
 
     it('should call manager.update for orders and driver shift status', async () => {
-      mockOrderRepo.find.mockResolvedValue([
-        makeMockOrder('order-1'),
-        makeMockOrder('order-2'),
-      ]);
+      mockOrderRepo.find.mockResolvedValue([makeMockOrder('order-1'), makeMockOrder('order-2')]);
       mockDepotRepo.findOne.mockResolvedValue(makeMockDepot());
       mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
       mockQueryRunner.manager.findOne.mockResolvedValue(makeMockUser());
@@ -314,12 +291,20 @@ describe('RoutesService', () => {
       expect(mockQueryRunner.manager.update).toHaveBeenCalledTimes(2);
 
       // First update: orders status -> ASSIGNED
-      const [orderEntity, , orderUpdate] = mockQueryRunner.manager.update.mock.calls[0];
+      const [orderEntity, , orderUpdate] = mockQueryRunner.manager.update.mock.calls[0] as [
+        unknown,
+        unknown,
+        Partial<Order>,
+      ];
       expect(orderEntity).toBe(Order);
       expect(orderUpdate.status).toBe(OrderStatus.ASSIGNED);
 
       // Second update: driver shift status -> BUSY
-      const [driverEntity, , driverUpdate] = mockQueryRunner.manager.update.mock.calls[1];
+      const [driverEntity, , driverUpdate] = mockQueryRunner.manager.update.mock.calls[1] as [
+        unknown,
+        unknown,
+        Partial<Driver>,
+      ];
       expect(driverEntity).toBe(Driver);
       expect(driverUpdate.currentShiftStatus).toBe('BUSY');
     });
@@ -356,10 +341,7 @@ describe('RoutesService', () => {
         ],
       };
 
-      mockOrderRepo.find.mockResolvedValue([
-        makeMockOrder('order-1'),
-        makeMockOrder('order-2'),
-      ]);
+      mockOrderRepo.find.mockResolvedValue([makeMockOrder('order-1'), makeMockOrder('order-2')]);
       mockDepotRepo.findOne.mockResolvedValue(makeMockDepot());
       mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
       mockQueryRunner.manager.findOne.mockResolvedValue(makeMockUser());
@@ -403,8 +385,8 @@ describe('RoutesService', () => {
 
       expect(result.total).toBe(1);
       expect(result.data).toHaveLength(1);
-      expect((result.data[0] as any).driverName).toBe('Nguyen Van A');
-      expect((result.data[0] as any).stopCount).toBe(3);
+      expect((result.data[0] as Record<string, unknown>).driverName).toBe('Nguyen Van A');
+      expect((result.data[0] as Record<string, unknown>).stopCount).toBe(3);
     });
   });
 
@@ -443,7 +425,13 @@ describe('RoutesService', () => {
       mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
       mockDepotRepo.findOne.mockResolvedValue(makeMockDepot());
 
-      const result = await service.findById('route-1') as any;
+      const result = (await service.findById('route-1')) as {
+        id: string;
+        stops: { sequenceNo: number }[];
+        driver: { fullName: string };
+        depot: { name: string };
+        polyline: [number, number][];
+      };
 
       expect(result.id).toBe('route-1');
       expect(result.stops).toHaveLength(1);
