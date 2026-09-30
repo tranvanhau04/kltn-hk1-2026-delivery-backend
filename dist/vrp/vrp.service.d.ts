@@ -15,6 +15,8 @@ export interface VrpOrder {
     weightKg: number;
     volumeM3: number;
     codAmount: number;
+    timeWindowStart?: number;
+    timeWindowEnd?: number;
 }
 export interface VrpDriver {
     userId: string;
@@ -35,7 +37,9 @@ export interface VrpStopResult {
     latitude: number;
     longitude: number;
     weightKg: number;
+    volumeM3: number;
     codAmount: number;
+    estimatedArrivalMin: number | null;
 }
 export interface VrpRouteResult {
     driverId: string;
@@ -47,15 +51,25 @@ export interface VrpRouteResult {
     totalDistanceKm: number;
     totalEstimatedTimeMin: number;
     totalWeightKg: number;
+    totalVolumeM3: number;
     polyline: [number, number][];
+}
+export interface VrpUnassignedOrder {
+    orderId: string;
+    code: string;
+    reason: string;
 }
 export interface VrpSolutionResult {
     routes: VrpRouteResult[];
     totalDistanceKm: number;
     totalOrders: number;
+    assignedOrders: number;
+    unassignedOrders: VrpUnassignedOrder[];
     optimizationTimeMs: number;
     depot: VrpDepot;
+    algorithmUsed: string;
 }
 export declare class VrpService {
+    private readonly logger;
     solve(depot: VrpDepot, orders: VrpOrder[], drivers: VrpDriver[]): Promise<VrpSolutionResult>;
 }
