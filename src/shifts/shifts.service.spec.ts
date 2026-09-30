@@ -45,6 +45,10 @@ function makeMockShift(overrides: Partial<Shift> = {}): Shift {
     currentLongitude: null,
     createdAt: new Date(),
     updatedAt: new Date(),
+    codCollected: 0,
+    codSubmitted: 0,
+    reconciledBy: null,
+    reconciledAt: null,
     driver: {} as Driver,
     ...overrides,
   };
