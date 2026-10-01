@@ -23,10 +23,7 @@ let VrpModule = class VrpModule {
 exports.VrpModule = VrpModule;
 exports.VrpModule = VrpModule = __decorate([
     (0, common_1.Module)({
-        imports: [
-            typeorm_1.TypeOrmModule.forFeature([order_entity_1.Order, driver_entity_1.Driver, depot_entity_1.Depot, user_entity_1.User]),
-            routes_module_1.RoutesModule,
-        ],
+        imports: [typeorm_1.TypeOrmModule.forFeature([order_entity_1.Order, driver_entity_1.Driver, depot_entity_1.Depot, user_entity_1.User]), routes_module_1.RoutesModule],
         controllers: [vrp_controller_1.VrpController],
         providers: [vrp_service_1.VrpService, graph_service_1.GraphService, max_flow_service_1.MaxFlowService],
     })

@@ -11,11 +11,13 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Driver = exports.DriverShiftStatus = void 0;
 const typeorm_1 = require("typeorm");
+const shift_entity_1 = require("./shift.entity");
 var DriverShiftStatus;
 (function (DriverShiftStatus) {
     DriverShiftStatus["OFFLINE"] = "OFFLINE";
     DriverShiftStatus["ONLINE_READY"] = "ONLINE_READY";
     DriverShiftStatus["BUSY"] = "BUSY";
+    DriverShiftStatus["ON_DUTY"] = "ON_DUTY";
 })(DriverShiftStatus || (exports.DriverShiftStatus = DriverShiftStatus = {}));
 let Driver = class Driver {
     userId;
@@ -24,6 +26,7 @@ let Driver = class Driver {
     maxWeightKg;
     maxVolumeM3;
     currentShiftStatus;
+    shifts;
 };
 exports.Driver = Driver;
 __decorate([
@@ -55,6 +58,10 @@ __decorate([
     }),
     __metadata("design:type", String)
 ], Driver.prototype, "currentShiftStatus", void 0);
+__decorate([
+    (0, typeorm_1.OneToMany)(() => shift_entity_1.Shift, (shift) => shift.driver),
+    __metadata("design:type", Array)
+], Driver.prototype, "shifts", void 0);
 exports.Driver = Driver = __decorate([
     (0, typeorm_1.Entity)('drivers')
 ], Driver);

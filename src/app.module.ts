@@ -13,6 +13,7 @@ import { ZonesModule } from './zones/zones.module';
 import { DriversModule } from './drivers/drivers.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
+import { ShiftsModule } from './shifts/shifts.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 
@@ -31,6 +32,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     TrackingModule,
     ZonesModule,
     DriversModule,
+    ShiftsModule,
   ],
   controllers: [AppController],
   providers: [

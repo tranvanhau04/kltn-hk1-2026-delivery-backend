@@ -1,7 +1,9 @@
+import { Shift } from './shift.entity';
 export declare enum DriverShiftStatus {
     OFFLINE = "OFFLINE",
     ONLINE_READY = "ONLINE_READY",
-    BUSY = "BUSY"
+    BUSY = "BUSY",
+    ON_DUTY = "ON_DUTY"
 }
 export declare class Driver {
     userId: string;
@@ -10,4 +12,5 @@ export declare class Driver {
     maxWeightKg: number;
     maxVolumeM3: number;
     currentShiftStatus: string;
+    shifts: Shift[];
 }

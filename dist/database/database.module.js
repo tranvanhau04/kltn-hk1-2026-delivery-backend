@@ -20,6 +20,7 @@ const zone_entity_1 = require("../entities/zone.entity");
 const zone_driver_entity_1 = require("../entities/zone-driver.entity");
 const password_reset_entity_1 = require("../entities/password-reset.entity");
 const order_status_history_entity_1 = require("../entities/order-status-history.entity");
+const shift_entity_1 = require("../entities/shift.entity");
 let DatabaseModule = class DatabaseModule {
 };
 exports.DatabaseModule = DatabaseModule;
@@ -45,6 +46,7 @@ exports.DatabaseModule = DatabaseModule = __decorate([
                     zone_driver_entity_1.ZoneDriver,
                     password_reset_entity_1.PasswordReset,
                     order_status_history_entity_1.OrderStatusHistory,
+                    shift_entity_1.Shift,
                 ],
                 synchronize: false,
                 logging: false,

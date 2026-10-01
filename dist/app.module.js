@@ -22,6 +22,7 @@ const zones_module_1 = require("./zones/zones.module");
 const drivers_module_1 = require("./drivers/drivers.module");
 const auth_module_1 = require("./auth/auth.module");
 const users_module_1 = require("./users/users.module");
+const shifts_module_1 = require("./shifts/shifts.module");
 const jwt_auth_guard_1 = require("./auth/guards/jwt-auth.guard");
 const roles_guard_1 = require("./auth/guards/roles.guard");
 let AppModule = class AppModule {
@@ -43,6 +44,7 @@ exports.AppModule = AppModule = __decorate([
             tracking_module_1.TrackingModule,
             zones_module_1.ZonesModule,
             drivers_module_1.DriversModule,
+            shifts_module_1.ShiftsModule,
         ],
         controllers: [app_controller_1.AppController],
         providers: [

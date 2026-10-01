@@ -1,9 +1,11 @@
-import { Entity, Column, PrimaryColumn } from 'typeorm';
+import { Entity, Column, PrimaryColumn, OneToMany } from 'typeorm';
+import { Shift } from './shift.entity';
 
 export enum DriverShiftStatus {
   OFFLINE = 'OFFLINE',
   ONLINE_READY = 'ONLINE_READY',
   BUSY = 'BUSY',
+  ON_DUTY = 'ON_DUTY',
 }
 
 /**
@@ -34,4 +36,8 @@ export class Driver {
     default: 'OFFLINE',
   })
   currentShiftStatus: string;
+
+  /** Relation: one driver has many shifts (lazy-loaded by default via ShiftsService) */
+  @OneToMany(() => Shift, (shift) => shift.driver)
+  shifts: Shift[];
 }

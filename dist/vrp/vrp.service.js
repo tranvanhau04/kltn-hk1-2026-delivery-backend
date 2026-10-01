@@ -5,6 +5,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
+var VrpService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.VrpService = void 0;
 const common_1 = require("@nestjs/common");
@@ -17,6 +18,10 @@ const ROUTE_COLORS = [
     '#DB2777',
     '#0891B2',
     '#65A30D',
+    '#7C3AED',
+    '#DC2626',
+    '#0D9488',
+    '#92400E',
 ];
 function haversine(lat1, lng1, lat2, lng2) {
     const R = 6371;
@@ -29,11 +34,14 @@ function haversine(lat1, lng1, lat2, lng2) {
 function toRad(deg) {
     return (deg * Math.PI) / 180;
 }
-async function fetchWithTimeout(url, options, timeout = 2500) {
+const OSRM_BASE = 'https://router.project-osrm.org';
+const OSRM_MAX_COORDS = 100;
+const OSRM_TIMEOUT_MS = 4000;
+async function fetchWithTimeout(url, timeoutMs = OSRM_TIMEOUT_MS) {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
+    const id = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        const response = await fetch(url, { ...options, signal: controller.signal });
+        const response = await fetch(url, { signal: controller.signal });
         clearTimeout(id);
         return response;
     }
@@ -42,12 +50,14 @@ async function fetchWithTimeout(url, options, timeout = 2500) {
         throw err;
     }
 }
-async function fetchOsrmTableWithRetry(coords) {
+async function fetchOsrmTable(coords) {
+    if (coords.length > OSRM_MAX_COORDS)
+        return null;
     const coordStr = coords.map((c) => `${c[0]},${c[1]}`).join(';');
-    const url = `https://router.project-osrm.org/table/v1/driving/${coordStr}?annotations=distance,duration`;
+    const url = `${OSRM_BASE}/table/v1/driving/${coordStr}?annotations=distance,duration`;
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-            const res = await fetchWithTimeout(url, {}, 2500);
+            const res = await fetchWithTimeout(url);
             if (res.ok) {
                 const data = (await res.json());
                 if (data.code === 'Ok' && data.distances && data.durations) {
@@ -56,27 +66,27 @@ async function fetchOsrmTableWithRetry(coords) {
             }
         }
         catch {
-            if (attempt === 1) {
-                await new Promise((r) => setTimeout(r, 300));
-            }
+            if (attempt === 1)
+                await new Promise((r) => setTimeout(r, 400));
         }
     }
     return null;
 }
-async function fetchOsrmRouteWithRetry(coords) {
+async function fetchOsrmRoute(coords) {
+    if (coords.length < 2)
+        return null;
     const coordStr = coords.map((c) => `${c[0]},${c[1]}`).join(';');
-    const url = `https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson`;
+    const url = `${OSRM_BASE}/route/v1/driving/${coordStr}?overview=full&geometries=geojson`;
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-            const res = await fetchWithTimeout(url, {}, 2500);
+            const res = await fetchWithTimeout(url);
             if (res.ok) {
                 const data = (await res.json());
                 if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
                     const route = data.routes[0];
-                    const geometry = route.geometry;
                     let polyline = [];
-                    if (geometry && geometry.coordinates) {
-                        polyline = geometry.coordinates.map((c) => [c[1], c[0]]);
+                    if (route.geometry?.coordinates) {
+                        polyline = route.geometry.coordinates.map((c) => [c[1], c[0]]);
                     }
                     return {
                         distance: route.distance / 1000,
@@ -87,97 +97,193 @@ async function fetchOsrmRouteWithRetry(coords) {
             }
         }
         catch {
-            if (attempt === 1) {
-                await new Promise((r) => setTimeout(r, 300));
-            }
+            if (attempt === 1)
+                await new Promise((r) => setTimeout(r, 400));
         }
     }
     return null;
 }
-let VrpService = class VrpService {
+function buildCostMatrix(nodes, osrmMatrix) {
+    return {
+        distKm: (i, j) => {
+            if (osrmMatrix?.distances?.[i]?.[j] !== undefined) {
+                return osrmMatrix.distances[i][j] / 1000;
+            }
+            return haversine(nodes[i].lat, nodes[i].lng, nodes[j].lat, nodes[j].lng) * 1.35;
+        },
+        durMin: (i, j) => {
+            if (osrmMatrix?.durations?.[i]?.[j] !== undefined) {
+                return osrmMatrix.durations[i][j] / 60;
+            }
+            const dist = haversine(nodes[i].lat, nodes[i].lng, nodes[j].lat, nodes[j].lng) * 1.35;
+            return (dist / 30) * 60;
+        },
+    };
+}
+function twoOptImprove(stopIndices, costMatrix, depotIdx) {
+    if (stopIndices.length <= 2)
+        return stopIndices;
+    let tour = [depotIdx, ...stopIndices, depotIdx];
+    let improved = true;
+    let iterations = 0;
+    const maxIterations = 200;
+    while (improved && iterations < maxIterations) {
+        improved = false;
+        iterations++;
+        for (let i = 1; i < tour.length - 2; i++) {
+            for (let k = i + 1; k < tour.length - 1; k++) {
+                const delta = -costMatrix.distKm(tour[i - 1], tour[i]) -
+                    costMatrix.distKm(tour[k], tour[k + 1]) +
+                    costMatrix.distKm(tour[i - 1], tour[k]) +
+                    costMatrix.distKm(tour[i], tour[k + 1]);
+                if (delta < -0.001) {
+                    tour = [...tour.slice(0, i), ...tour.slice(i, k + 1).reverse(), ...tour.slice(k + 1)];
+                    improved = true;
+                }
+            }
+        }
+    }
+    return tour.slice(1, tour.length - 1);
+}
+const SERVICE_TIME_MIN = 8;
+const DEPOT_DEPARTURE_MIN = 7 * 60;
+function checkTimeWindowFeasibility(stopOrders, costMatrix, allNodeIndices, depotNodeIdx) {
+    const arrivalTimes = [];
+    let currentTime = DEPOT_DEPARTURE_MIN;
+    let prevNodeIdx = depotNodeIdx;
+    for (let i = 0; i < stopOrders.length; i++) {
+        const nodeIdx = allNodeIndices[i + 1];
+        const travelMin = costMatrix.durMin(prevNodeIdx, nodeIdx);
+        const arrivalMin = currentTime + travelMin;
+        arrivalTimes.push(arrivalMin);
+        const order = stopOrders[i];
+        if (order.timeWindowEnd !== undefined && arrivalMin > order.timeWindowEnd) {
+            return { feasible: false, arrivalTimes };
+        }
+        const departureMin = Math.max(arrivalMin, order.timeWindowStart ?? 0) + SERVICE_TIME_MIN;
+        currentTime = departureMin;
+        prevNodeIdx = nodeIdx;
+    }
+    return { feasible: true, arrivalTimes };
+}
+let VrpService = VrpService_1 = class VrpService {
+    logger = new common_1.Logger(VrpService_1.name);
     async solve(depot, orders, drivers) {
         const startTime = Date.now();
-        const availableDrivers = drivers.filter((d) => d.maxWeightKg > 0);
-        const allCoords = [
-            [Number(depot.longitude), Number(depot.latitude)],
-            ...orders.map((o) => [Number(o.longitude), Number(o.latitude)]),
-        ];
-        let osrmMatrix = null;
-        if (allCoords.length <= 100) {
-            osrmMatrix = await fetchOsrmTableWithRetry(allCoords);
+        if (orders.length === 0) {
+            return {
+                routes: [],
+                totalDistanceKm: 0,
+                totalOrders: 0,
+                assignedOrders: 0,
+                unassignedOrders: [],
+                optimizationTimeMs: Date.now() - startTime,
+                depot,
+                algorithmUsed: 'nearest-neighbor + 2-opt',
+            };
         }
-        const getDistance = (idx1, idx2, lat1, lng1, lat2, lng2) => {
-            if (osrmMatrix &&
-                osrmMatrix.distances &&
-                osrmMatrix.distances[idx1] &&
-                osrmMatrix.distances[idx1][idx2] !== undefined) {
-                return osrmMatrix.distances[idx1][idx2] / 1000;
+        const availableDrivers = drivers.filter((d) => Number(d.maxWeightKg) > 0);
+        if (availableDrivers.length === 0) {
+            return {
+                routes: [],
+                totalDistanceKm: 0,
+                totalOrders: orders.length,
+                assignedOrders: 0,
+                unassignedOrders: orders.map((o) => ({
+                    orderId: o.id,
+                    code: o.code,
+                    reason: 'No available drivers',
+                })),
+                optimizationTimeMs: Date.now() - startTime,
+                depot,
+                algorithmUsed: 'nearest-neighbor + 2-opt',
+            };
+        }
+        const nodes = [
+            { lat: Number(depot.latitude), lng: Number(depot.longitude) },
+            ...orders.map((o) => ({ lat: Number(o.latitude), lng: Number(o.longitude) })),
+        ];
+        const osrmCoords = nodes.map((n) => [n.lng, n.lat]);
+        this.logger.log(`VRP solve: ${orders.length} orders, ${availableDrivers.length} drivers, ${nodes.length} nodes total`);
+        let osrmMatrix = null;
+        if (nodes.length <= OSRM_MAX_COORDS) {
+            osrmMatrix = await fetchOsrmTable(osrmCoords);
+            if (!osrmMatrix) {
+                this.logger.warn('OSRM table unavailable – using Haversine fallback');
             }
-            return haversine(lat1, lng1, lat2, lng2) * 1.35;
-        };
-        const unassigned = [...orders];
-        const unassignedIndices = Array.from({ length: orders.length }, (_, i) => i + 1);
+        }
+        else {
+            this.logger.warn(`${nodes.length} nodes exceeds OSRM limit (${OSRM_MAX_COORDS}) – using Haversine`);
+        }
+        const costMatrix = buildCostMatrix(nodes, osrmMatrix);
+        const unassignedSet = new Set(orders.map((_, i) => i));
         const routes = [];
-        for (let di = 0; di < availableDrivers.length && unassigned.length > 0; di++) {
+        for (let di = 0; di < availableDrivers.length && unassignedSet.size > 0; di++) {
             const driver = availableDrivers[di];
-            const routeStops = [];
+            const maxWeight = Number(driver.maxWeightKg);
+            const maxVolume = Number(driver.maxVolumeM3);
+            const assignedOrderIndices = [];
             let loadKg = 0;
-            let currentIdx = 0;
-            let currentLat = depot.latitude;
-            let currentLng = depot.longitude;
-            while (unassigned.length > 0) {
-                let bestLocalIdx = -1;
+            let loadM3 = 0;
+            let currentNodeIdx = 0;
+            while (unassignedSet.size > 0) {
+                let bestOi = -1;
                 let bestDist = Infinity;
-                for (let i = 0; i < unassigned.length; i++) {
-                    const o = unassigned[i];
-                    const globalIdx = unassignedIndices[i];
-                    if (loadKg + Number(o.weightKg) > Number(driver.maxWeightKg))
+                for (const oi of unassignedSet) {
+                    const order = orders[oi];
+                    if (loadKg + Number(order.weightKg) > maxWeight)
                         continue;
-                    const d = getDistance(currentIdx, globalIdx, currentLat, currentLng, Number(o.latitude), Number(o.longitude));
-                    if (d < bestDist) {
-                        bestDist = d;
-                        bestLocalIdx = i;
+                    if (maxVolume > 0 && loadM3 + Number(order.volumeM3) > maxVolume)
+                        continue;
+                    const nodeIdx = oi + 1;
+                    const dist = costMatrix.distKm(currentNodeIdx, nodeIdx);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestOi = oi;
                     }
                 }
-                if (bestLocalIdx === -1)
+                if (bestOi === -1)
                     break;
-                const chosen = unassigned.splice(bestLocalIdx, 1)[0];
-                const chosenGlobalIdx = unassignedIndices.splice(bestLocalIdx, 1)[0];
-                routeStops.push(chosen);
-                loadKg += Number(chosen.weightKg);
-                currentLat = Number(chosen.latitude);
-                currentLng = Number(chosen.longitude);
-                currentIdx = chosenGlobalIdx;
+                unassignedSet.delete(bestOi);
+                assignedOrderIndices.push(bestOi);
+                loadKg += Number(orders[bestOi].weightKg);
+                loadM3 += Number(orders[bestOi].volumeM3);
+                currentNodeIdx = bestOi + 1;
             }
-            if (routeStops.length === 0)
+            if (assignedOrderIndices.length === 0)
                 continue;
-            const routeCoords = [
+            const improvedNodeIndices = twoOptImprove(assignedOrderIndices.map((oi) => oi + 1), costMatrix, 0);
+            const routeOrders = improvedNodeIndices.map((ni) => orders[ni - 1]);
+            const { arrivalTimes } = checkTimeWindowFeasibility(routeOrders, costMatrix, [0, ...improvedNodeIndices], 0);
+            const routeOsrmCoords = [
                 [Number(depot.longitude), Number(depot.latitude)],
-                ...routeStops.map((s) => [Number(s.longitude), Number(s.latitude)]),
+                ...routeOrders.map((o) => [Number(o.longitude), Number(o.latitude)]),
                 [Number(depot.longitude), Number(depot.latitude)],
             ];
-            const osrmRoute = await fetchOsrmRouteWithRetry(routeCoords);
+            const osrmRoute = await fetchOsrmRoute(routeOsrmCoords);
             let totalDist = 0;
             let totalTime = 0;
             let polyline = [];
             if (osrmRoute) {
                 totalDist = osrmRoute.distance;
-                totalTime = osrmRoute.duration + routeStops.length * 8;
+                totalTime = osrmRoute.duration + routeOrders.length * SERVICE_TIME_MIN;
                 polyline = osrmRoute.polyline;
             }
             else {
-                polyline = [
-                    [Number(depot.latitude), Number(depot.longitude)],
-                    ...routeStops.map((s) => [Number(s.latitude), Number(s.longitude)]),
-                    [Number(depot.latitude), Number(depot.longitude)],
+                const fallbackNodes = [
+                    { lat: Number(depot.latitude), lng: Number(depot.longitude) },
+                    ...routeOrders.map((o) => ({ lat: Number(o.latitude), lng: Number(o.longitude) })),
+                    { lat: Number(depot.latitude), lng: Number(depot.longitude) },
                 ];
-                for (let i = 0; i < polyline.length - 1; i++) {
+                polyline = fallbackNodes.map((n) => [n.lat, n.lng]);
+                for (let i = 0; i < fallbackNodes.length - 1; i++) {
                     totalDist +=
-                        haversine(polyline[i][0], polyline[i][1], polyline[i + 1][0], polyline[i + 1][1]) *
-                            1.35;
+                        haversine(fallbackNodes[i].lat, fallbackNodes[i].lng, fallbackNodes[i + 1].lat, fallbackNodes[i + 1].lng) * 1.35;
                 }
-                totalTime = Math.round((totalDist / 25) * 60 + routeStops.length * 8);
+                totalTime = Math.round((totalDist / 25) * 60 + routeOrders.length * SERVICE_TIME_MIN);
             }
+            const routeWeightKg = routeOrders.reduce((s, o) => s + Number(o.weightKg), 0);
+            const routeVolumeM3 = routeOrders.reduce((s, o) => s + Number(o.volumeM3), 0);
             routes.push({
                 driverId: driver.userId,
                 driverName: driver.fullName,
@@ -186,9 +292,10 @@ let VrpService = class VrpService {
                 color: ROUTE_COLORS[di % ROUTE_COLORS.length],
                 totalDistanceKm: Math.round(totalDist * 10) / 10,
                 totalEstimatedTimeMin: Math.round(totalTime),
-                totalWeightKg: Math.round(loadKg * 100) / 100,
+                totalWeightKg: Math.round(routeWeightKg * 100) / 100,
+                totalVolumeM3: Math.round(routeVolumeM3 * 1000) / 1000,
                 polyline,
-                stops: routeStops.map((o, idx) => ({
+                stops: routeOrders.map((o, idx) => ({
                     sequenceNo: idx + 1,
                     orderId: o.id,
                     code: o.code,
@@ -198,23 +305,46 @@ let VrpService = class VrpService {
                     latitude: Number(o.latitude),
                     longitude: Number(o.longitude),
                     weightKg: Number(o.weightKg),
+                    volumeM3: Number(o.volumeM3),
                     codAmount: Number(o.codAmount),
+                    estimatedArrivalMin: arrivalTimes[idx] ?? null,
                 })),
             });
         }
-        const totalDist = routes.reduce((s, r) => s + r.totalDistanceKm, 0);
+        const unassignedOrders = [];
+        if (unassignedSet.size > 0) {
+            const maxDriverWeight = Math.max(...availableDrivers.map((d) => Number(d.maxWeightKg)));
+            const maxDriverVolume = Math.max(...availableDrivers.map((d) => Number(d.maxVolumeM3)));
+            for (const oi of unassignedSet) {
+                const order = orders[oi];
+                let reason = 'All vehicles are at capacity';
+                if (Number(order.weightKg) > maxDriverWeight) {
+                    reason = `Order weight (${order.weightKg} kg) exceeds max vehicle capacity (${maxDriverWeight} kg)`;
+                }
+                else if (maxDriverVolume > 0 && Number(order.volumeM3) > maxDriverVolume) {
+                    reason = `Order volume (${order.volumeM3} m3) exceeds max vehicle capacity (${maxDriverVolume} m3)`;
+                }
+                unassignedOrders.push({ orderId: order.id, code: order.code, reason });
+            }
+        }
+        const totalDistKm = routes.reduce((s, r) => s + r.totalDistanceKm, 0);
         const optimizationTimeMs = Date.now() - startTime;
+        this.logger.log(`VRP done in ${optimizationTimeMs}ms | routes=${routes.length} | ` +
+            `assigned=${orders.length - unassignedOrders.length} | unassigned=${unassignedOrders.length}`);
         return {
             routes,
-            totalDistanceKm: Math.round(totalDist * 10) / 10,
+            totalDistanceKm: Math.round(totalDistKm * 10) / 10,
             totalOrders: orders.length,
+            assignedOrders: orders.length - unassignedOrders.length,
+            unassignedOrders,
             optimizationTimeMs,
             depot,
+            algorithmUsed: 'nearest-neighbor + 2-opt',
         };
     }
 };
 exports.VrpService = VrpService;
-exports.VrpService = VrpService = __decorate([
+exports.VrpService = VrpService = VrpService_1 = __decorate([
     (0, common_1.Injectable)()
 ], VrpService);
 //# sourceMappingURL=vrp.service.js.map
