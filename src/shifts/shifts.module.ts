@@ -9,9 +9,7 @@ import { Stop } from '../entities/stop.entity';
 import { Depot } from '../entities/depot.entity';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Shift, Driver, Route, Stop, Depot]),
-  ],
+  imports: [TypeOrmModule.forFeature([Shift, Driver, Route, Stop, Depot])],
   controllers: [ShiftsController],
   providers: [ShiftsService],
   exports: [ShiftsService],

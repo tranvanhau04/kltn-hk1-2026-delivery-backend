@@ -217,9 +217,7 @@ describe('ShiftsService', () => {
       mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
       mockShiftRepo.findOne.mockResolvedValue(null); // No open shift
 
-      await expect(service.closeShift({}, makeDriverJwt())).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.closeShift({}, makeDriverJwt())).rejects.toThrow(BadRequestException);
     });
 
     it('should throw BadRequestException with Vietnamese message', async () => {
@@ -267,7 +265,8 @@ describe('ShiftsService', () => {
       await service.closeShift({}, makeDriverJwt());
 
       expect(mockShiftRepo.save).toHaveBeenCalled();
-      const savedShift = mockShiftRepo.save.mock.calls[0][0] as Shift;
+      const saveCalls = mockShiftRepo.save.mock.calls as [Shift][];
+      const savedShift = saveCalls[0][0];
       expect(savedShift.status).toBe(ShiftStatus.CLOSED);
       expect(savedShift.endTime).toBeInstanceOf(Date);
     });
@@ -307,7 +306,9 @@ describe('ShiftsService', () => {
 
       // Stops intentionally out of order — service must sort them
       const stops = [makeMockStop(3), makeMockStop(1), makeMockStop(2)];
-      mockStopRepo.find.mockResolvedValue(stops.sort((a, b) => (a.sequenceNo ?? 0) - (b.sequenceNo ?? 0)));
+      mockStopRepo.find.mockResolvedValue(
+        stops.sort((a, b) => (a.sequenceNo ?? 0) - (b.sequenceNo ?? 0)),
+      );
       mockDepotRepo.findOne.mockResolvedValue(makeMockDepot());
 
       const result = await service.getActiveRoute(makeDriverJwt());
@@ -373,15 +374,18 @@ describe('ShiftsService', () => {
     });
 
     it('should count delivered orders and accumulate COD amount', async () => {
-      const freshDriver = { ...makeMockDriver(), currentShiftStatus: DriverShiftStatus.ONLINE_READY };
+      const freshDriver = {
+        ...makeMockDriver(),
+        currentShiftStatus: DriverShiftStatus.ONLINE_READY,
+      };
       mockDriverRepo.findOne.mockResolvedValue(freshDriver);
       mockShiftRepo.findOne.mockResolvedValue(makeMockShift());
       mockRouteRepo.createQueryBuilder.mockReturnValue(buildRoutesQb(makeMockRoute()));
 
       const stops = [
-        makeMockStop(1, OrderStatus.DELIVERED),  // cod: 100000
-        makeMockStop(2, OrderStatus.ASSIGNED),   // not delivered
-        makeMockStop(3, OrderStatus.DELIVERED),  // cod: 100000
+        makeMockStop(1, OrderStatus.DELIVERED), // cod: 100000
+        makeMockStop(2, OrderStatus.ASSIGNED), // not delivered
+        makeMockStop(3, OrderStatus.DELIVERED), // cod: 100000
       ];
       mockStopRepo.find.mockResolvedValue(stops);
 

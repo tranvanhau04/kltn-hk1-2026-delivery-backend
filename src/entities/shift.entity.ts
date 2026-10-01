@@ -120,4 +120,3 @@ export class Shift {
   @JoinColumn({ name: 'driver_id', referencedColumnName: 'userId' })
   driver: Driver;
 }
-

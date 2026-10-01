@@ -1,16 +1,11 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Shift, ShiftStatus } from '../entities/shift.entity';
 import { Driver, DriverShiftStatus } from '../entities/driver.entity';
 import { Route } from '../entities/route.entity';
 import { Stop } from '../entities/stop.entity';
-import { Order, OrderStatus } from '../entities/order.entity';
+import { OrderStatus } from '../entities/order.entity';
 import { Depot } from '../entities/depot.entity';
 import { OpenShiftDto } from './dto/open-shift.dto';
 import { CloseShiftDto } from './dto/close-shift.dto';
@@ -69,8 +64,7 @@ export class ShiftsService {
       status: shift.status,
       startingCashCod: Number(shift.startingCashCod),
       currentLatitude: shift.currentLatitude !== null ? Number(shift.currentLatitude) : null,
-      currentLongitude:
-        shift.currentLongitude !== null ? Number(shift.currentLongitude) : null,
+      currentLongitude: shift.currentLongitude !== null ? Number(shift.currentLongitude) : null,
       createdAt: shift.createdAt,
       updatedAt: shift.updatedAt,
     };
@@ -112,7 +106,10 @@ export class ShiftsService {
     const saved = await this.shiftRepo.save(shift);
 
     // Update driver status → ONLINE_READY
-    await this.driverRepo.update({ userId: driver.userId }, { currentShiftStatus: DriverShiftStatus.ONLINE_READY });
+    await this.driverRepo.update(
+      { userId: driver.userId },
+      { currentShiftStatus: DriverShiftStatus.ONLINE_READY },
+    );
 
     this.logger.log(`Driver ${driver.userId} opened shift ${saved.id}`);
 
@@ -147,7 +144,10 @@ export class ShiftsService {
     const saved = await this.shiftRepo.save(shift);
 
     // Update driver status → OFFLINE
-    await this.driverRepo.update({ userId: driver.userId }, { currentShiftStatus: DriverShiftStatus.OFFLINE });
+    await this.driverRepo.update(
+      { userId: driver.userId },
+      { currentShiftStatus: DriverShiftStatus.OFFLINE },
+    );
 
     this.logger.log(`Driver ${driver.userId} closed shift ${saved.id}`);
 
