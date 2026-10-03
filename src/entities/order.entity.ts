@@ -6,6 +6,8 @@ export enum OrderStatus {
   IN_TRANSIT = 'IN_TRANSIT',
   DELIVERED = 'DELIVERED',
   FAILED = 'FAILED',
+  RESCHEDULED = 'RESCHEDULED',
+  CANCELLED = 'CANCELLED',
 }
 
 @Entity('orders')

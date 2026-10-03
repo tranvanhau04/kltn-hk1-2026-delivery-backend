@@ -3,7 +3,9 @@ export declare enum OrderStatus {
     ASSIGNED = "ASSIGNED",
     IN_TRANSIT = "IN_TRANSIT",
     DELIVERED = "DELIVERED",
-    FAILED = "FAILED"
+    FAILED = "FAILED",
+    RESCHEDULED = "RESCHEDULED",
+    CANCELLED = "CANCELLED"
 }
 export declare class Order {
     id: string;

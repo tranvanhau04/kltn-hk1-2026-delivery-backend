@@ -12,6 +12,7 @@ import { ZoneDriver } from '../entities/zone-driver.entity';
 import { PasswordReset } from '../entities/password-reset.entity';
 import { OrderStatusHistory } from '../entities/order-status-history.entity';
 import { Shift } from '../entities/shift.entity';
+import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { Shift } from '../entities/shift.entity';
         PasswordReset,
         OrderStatusHistory,
         Shift,
+        ProofOfDelivery,
       ],
       synchronize: false, // schema already created by init.sql
       logging: false,
