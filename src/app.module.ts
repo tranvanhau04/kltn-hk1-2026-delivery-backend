@@ -16,6 +16,7 @@ import { UsersModule } from './users/users.module';
 import { ShiftsModule } from './shifts/shifts.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     ZonesModule,
     DriversModule,
     ShiftsModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [
