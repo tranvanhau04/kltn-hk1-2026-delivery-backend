@@ -30,6 +30,14 @@ CREATE TABLE IF NOT EXISTS `shifts` (
   COLLATE=utf8mb4_unicode_ci
   COMMENT='Driver working shifts: tracks shift lifecycle and COD cash balance';
 
+-- If table shifts already existed from init.sql, add the missing Task 7.1 columns:
+ALTER TABLE `shifts`
+  ADD COLUMN IF NOT EXISTS `starting_cash_cod` DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER `status`,
+  ADD COLUMN IF NOT EXISTS `current_latitude`  DECIMAL(10,7) NULL AFTER `starting_cash_cod`,
+  ADD COLUMN IF NOT EXISTS `current_longitude` DECIMAL(10,7) NULL AFTER `current_latitude`,
+  ADD COLUMN IF NOT EXISTS `created_at`        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER `current_longitude`,
+  ADD COLUMN IF NOT EXISTS `updated_at`        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`;
+
 -- =============================================================================
 -- Also extend drivers.current_shift_status to accommodate ON_DUTY value.
 -- The column is VARCHAR(20) so existing data is not affected; just documenting.
@@ -37,3 +45,4 @@ CREATE TABLE IF NOT EXISTS `shifts` (
 -- ALTER TABLE `drivers`
 --   MODIFY COLUMN `current_shift_status` VARCHAR(20) NOT NULL DEFAULT 'OFFLINE';
 -- (No-op: column already VARCHAR(20) — no action required.)
+

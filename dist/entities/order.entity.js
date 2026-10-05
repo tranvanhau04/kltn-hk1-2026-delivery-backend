@@ -18,6 +18,8 @@ var OrderStatus;
     OrderStatus["IN_TRANSIT"] = "IN_TRANSIT";
     OrderStatus["DELIVERED"] = "DELIVERED";
     OrderStatus["FAILED"] = "FAILED";
+    OrderStatus["RESCHEDULED"] = "RESCHEDULED";
+    OrderStatus["CANCELLED"] = "CANCELLED";
 })(OrderStatus || (exports.OrderStatus = OrderStatus = {}));
 let Order = class Order {
     id;
