@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
 import { ShiftsService } from './shifts.service';
 import { OpenShiftDto } from './dto/open-shift.dto';
 import { CloseShiftDto } from './dto/close-shift.dto';
@@ -12,6 +12,7 @@ import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
  *
  * Routes:
  *   POST /shifts/open          → Open a new shift (DRIVER role)
+ *   POST /shifts/:id/close     → Close shift by ID with COD declaration (Task 9.1)
  *   POST /shifts/close         → Close current open shift (DRIVER role)
  *   GET  /driver/active-route  → Active route for the day (DRIVER role)
  *   GET  /driver/shift/summary → Shift summary metrics (DRIVER role)
@@ -47,6 +48,22 @@ export class ShiftsController {
   @Roles(UserRole.DRIVER)
   openShiftAlias(@Body() dto: OpenShiftDto, @CurrentUser() user: JwtPayload) {
     return this.shiftsService.openShift(dto, user);
+  }
+
+  /**
+   * POST /shifts/:id/close  (Task 9.1)
+   * Đóng ca theo shift ID cụ thể, tài xế khai báo codSubmitted.
+   * Trạng thái chuyển OPEN → PENDING_SETTLEMENT.
+   */
+  @Post('shifts/:id/close')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.DRIVER)
+  closeShiftById(
+    @Param('id') shiftId: string,
+    @Body() dto: CloseShiftDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.shiftsService.closeShiftById(shiftId, dto, user);
   }
 
   /**

@@ -1,6 +1,12 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Shift, ShiftStatus } from '../entities/shift.entity';
 import { Driver, DriverShiftStatus } from '../entities/driver.entity';
 import { Route } from '../entities/route.entity';
@@ -63,6 +69,8 @@ export class ShiftsService {
       endTime: shift.endTime ?? null,
       status: shift.status,
       startingCashCod: Number(shift.startingCashCod),
+      codCollected: Number(shift.codCollected) || 0,
+      codSubmitted: Number(shift.codSubmitted) || 0,
       currentLatitude: shift.currentLatitude !== null ? Number(shift.currentLatitude) : null,
       currentLongitude: shift.currentLongitude !== null ? Number(shift.currentLongitude) : null,
       createdAt: shift.createdAt,
@@ -120,10 +128,102 @@ export class ShiftsService {
     };
   }
 
-  // ─── POST /shifts/close ──────────────────────────────────────────────────────
+  // ─── POST /shifts/:id/close & POST /shifts/close ─────────────────────────────
+
+  /**
+   * Task 9.1: Close shift by ID with COD declaration.
+   * Business rules:
+   *   1. Shift must exist
+   *   2. Shift must belong to the authenticated driver
+   *   3. Shift must be in OPEN status
+   *   4. Check pending/arrived stops on active route (warn, don't block)
+   *   5. Update status → PENDING_SETTLEMENT, end_time = now, cod_submitted = dto.codSubmitted
+   *   6. Update driver.current_shift_status → OFFLINE
+   *   7. Calculate codDifference = codCollected - codSubmitted
+   */
+  async closeShiftById(shiftId: string, dto: CloseShiftDto, user: JwtPayload) {
+    const driver = await this.resolveDriver(user);
+
+    // 1. Tìm ca làm việc theo ID
+    const shift = await this.shiftRepo.findOne({ where: { id: shiftId } });
+
+    if (!shift) {
+      throw new NotFoundException(`Không tìm thấy ca làm việc với id=${shiftId}`);
+    }
+
+    // 2. Xác thực quyền sở hữu
+    if (shift.driverId !== driver.userId) {
+      throw new ForbiddenException('Bạn không có quyền đóng ca làm việc này');
+    }
+
+    // 3. Kiểm tra trạng thái OPEN
+    if (shift.status !== ShiftStatus.OPEN) {
+      throw new BadRequestException(
+        `Ca làm việc đang ở trạng thái ${shift.status}, chỉ có thể đóng ca đang OPEN`,
+      );
+    }
+
+    // 4. Kiểm tra stops còn pending (cảnh báo nhưng vẫn cho đóng ca)
+    let pendingStopsCount = 0;
+    const activeRoute = await this.routeRepo
+      .createQueryBuilder('route')
+      .where('route.driver_id = :driverId', { driverId: driver.userId })
+      .andWhere('route.status IN (:...statuses)', {
+        statuses: ['ASSIGNED', 'IN_PROGRESS', 'CONFIRMED', 'PLANNED'],
+      })
+      .orderBy('route.created_at', 'DESC')
+      .getOne();
+
+    if (activeRoute) {
+      pendingStopsCount = await this.stopRepo.count({
+        where: { routeId: activeRoute.id, status: In(['PENDING', 'ARRIVED']) },
+      });
+    }
+
+    // 5. Cập nhật shift
+    shift.status = ShiftStatus.PENDING_SETTLEMENT;
+    shift.endTime = new Date();
+    shift.codSubmitted = dto.codSubmitted;
+    if (dto.latitude !== undefined) shift.currentLatitude = dto.latitude;
+    if (dto.longitude !== undefined) shift.currentLongitude = dto.longitude;
+
+    const saved = await this.shiftRepo.save(shift);
+
+    // 6. Chuyển trạng thái tài xế sang OFFLINE
+    await this.driverRepo.update(
+      { userId: driver.userId },
+      { currentShiftStatus: DriverShiftStatus.OFFLINE },
+    );
+
+    // 7. Tính chênh lệch COD
+    const codCollected = Number(shift.codCollected) || 0;
+    const codSubmitted = Number(dto.codSubmitted) || 0;
+    const codDifference = codCollected - codSubmitted;
+
+    this.logger.log(
+      `Driver ${driver.userId} closed shift ${saved.id} → PENDING_SETTLEMENT ` +
+      `(collected=${codCollected}, submitted=${codSubmitted}, diff=${codDifference})`,
+    );
+
+    return {
+      success: true,
+      message: 'Đã đóng ca thành công. Chờ thủ quỹ đối soát.',
+      shift: this.formatShift(saved),
+      summary: {
+        codCollected,
+        codSubmitted,
+        codDifference,
+        pendingStopsWarning:
+          pendingStopsCount > 0
+            ? `Còn ${pendingStopsCount} điểm dừng chưa hoàn thành`
+            : null,
+      },
+    };
+  }
 
   /**
    * Close the currently-open shift for the authenticated driver.
+   * Backward-compatible wrapper delegating to closeShiftById.
    */
   async closeShift(dto: CloseShiftDto, user: JwtPayload) {
     const driver = await this.resolveDriver(user);
@@ -136,26 +236,14 @@ export class ShiftsService {
       throw new BadRequestException('Tài xế hiện không có ca làm việc nào đang mở');
     }
 
-    shift.status = ShiftStatus.CLOSED;
-    shift.endTime = new Date();
-    if (dto.latitude !== undefined) shift.currentLatitude = dto.latitude;
-    if (dto.longitude !== undefined) shift.currentLongitude = dto.longitude;
-
-    const saved = await this.shiftRepo.save(shift);
-
-    // Update driver status → OFFLINE
-    await this.driverRepo.update(
-      { userId: driver.userId },
-      { currentShiftStatus: DriverShiftStatus.OFFLINE },
-    );
-
-    this.logger.log(`Driver ${driver.userId} closed shift ${saved.id}`);
-
-    return {
-      success: true,
-      message: 'Đã đóng ca làm việc thành công',
-      shift: this.formatShift(saved),
+    const closeDto: CloseShiftDto = {
+      codSubmitted: dto.codSubmitted ?? dto.endingCash ?? 0,
+      notes: dto.notes,
+      latitude: dto.latitude,
+      longitude: dto.longitude,
     };
+
+    return this.closeShiftById(shift.id, closeDto, user);
   }
 
   // ─── GET /driver/active-route ─────────────────────────────────────────────────
@@ -267,6 +355,7 @@ export class ShiftsService {
 
     let assignedOrdersCount = 0;
     let deliveredOrdersCount = 0;
+    let failedOrdersCount = 0;
     let pendingCodAmount = 0;
 
     // Find the latest active route
@@ -289,6 +378,13 @@ export class ShiftsService {
       const deliveredStops = stops.filter((s) => s.order?.status === OrderStatus.DELIVERED);
       deliveredOrdersCount = deliveredStops.length;
 
+      failedOrdersCount = stops.filter(
+        (s) =>
+          s.order?.status === OrderStatus.FAILED ||
+          s.order?.status === OrderStatus.RESCHEDULED ||
+          s.order?.status === OrderStatus.CANCELLED,
+      ).length;
+
       pendingCodAmount = deliveredStops.reduce(
         (sum, s) => sum + (s.order ? Number(s.order.codAmount) : 0),
         0,
@@ -300,6 +396,7 @@ export class ShiftsService {
       activeShift: activeShift ? this.formatShift(activeShift) : null,
       assignedOrdersCount,
       deliveredOrdersCount,
+      failedOrdersCount,
       pendingCodAmount,
     };
   }

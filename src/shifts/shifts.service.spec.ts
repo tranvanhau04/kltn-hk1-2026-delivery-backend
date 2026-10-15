@@ -5,7 +5,7 @@
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ShiftsService } from './shifts.service';
 import { Shift, ShiftStatus } from '../entities/shift.entity';
 import { Driver, DriverShiftStatus } from '../entities/driver.entity';
@@ -120,6 +120,7 @@ describe('ShiftsService', () => {
 
   const mockStopRepo = {
     find: jest.fn(),
+    count: jest.fn(),
   };
 
   const mockOrderRepo = {};
@@ -143,6 +144,14 @@ describe('ShiftsService', () => {
 
     service = module.get<ShiftsService>(ShiftsService);
     jest.clearAllMocks();
+
+    mockRouteRepo.createQueryBuilder.mockReturnValue({
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(null),
+    });
+    mockStopRepo.count.mockResolvedValue(0);
   });
 
   // ─── openShift() ──────────────────────────────────────────────────────────────
@@ -210,14 +219,18 @@ describe('ShiftsService', () => {
     it('should throw NotFoundException when driver profile does not exist', async () => {
       mockDriverRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.closeShift({}, makeDriverJwt())).rejects.toThrow(NotFoundException);
+      await expect(service.closeShift({ codSubmitted: 0 }, makeDriverJwt())).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw BadRequestException when no open shift exists', async () => {
       mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
       mockShiftRepo.findOne.mockResolvedValue(null); // No open shift
 
-      await expect(service.closeShift({}, makeDriverJwt())).rejects.toThrow(BadRequestException);
+      await expect(service.closeShift({ codSubmitted: 0 }, makeDriverJwt())).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should throw BadRequestException with Vietnamese message', async () => {
@@ -225,7 +238,7 @@ describe('ShiftsService', () => {
       mockShiftRepo.findOne.mockResolvedValue(null);
 
       try {
-        await service.closeShift({}, makeDriverJwt());
+        await service.closeShift({ codSubmitted: 0 }, makeDriverJwt());
         fail('Expected BadRequestException');
       } catch (err: unknown) {
         expect((err as BadRequestException).message).toBe(
@@ -236,17 +249,20 @@ describe('ShiftsService', () => {
 
     it('should close the shift and set driver status to OFFLINE', async () => {
       const openShift = makeMockShift({ status: ShiftStatus.OPEN });
-      const closedShift = makeMockShift({ status: ShiftStatus.CLOSED, endTime: new Date() });
+      const pendingShift = makeMockShift({
+        status: ShiftStatus.PENDING_SETTLEMENT,
+        endTime: new Date(),
+      });
 
       mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
       mockShiftRepo.findOne.mockResolvedValue(openShift);
-      mockShiftRepo.save.mockResolvedValue(closedShift);
+      mockShiftRepo.save.mockResolvedValue(pendingShift);
       mockDriverRepo.update.mockResolvedValue({});
 
-      const result = await service.closeShift({}, makeDriverJwt());
+      const result = await service.closeShift({ codSubmitted: 0 }, makeDriverJwt());
 
       expect(result.success).toBe(true);
-      expect(result.shift.status).toBe(ShiftStatus.CLOSED);
+      expect(result.shift.status).toBe(ShiftStatus.PENDING_SETTLEMENT);
 
       // Driver status must be set to OFFLINE
       expect(mockDriverRepo.update).toHaveBeenCalledWith(
@@ -255,20 +271,108 @@ describe('ShiftsService', () => {
       );
     });
 
-    it('should set endTime when closing shift', async () => {
+    it('should set endTime and status PENDING_SETTLEMENT when closing shift', async () => {
       const openShift = makeMockShift();
       mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
       mockShiftRepo.findOne.mockResolvedValue(openShift);
       mockShiftRepo.save.mockImplementation((s: Shift) => Promise.resolve(s));
       mockDriverRepo.update.mockResolvedValue({});
 
-      await service.closeShift({}, makeDriverJwt());
+      await service.closeShift({ codSubmitted: 150000 }, makeDriverJwt());
 
       expect(mockShiftRepo.save).toHaveBeenCalled();
       const saveCalls = mockShiftRepo.save.mock.calls as [Shift][];
       const savedShift = saveCalls[0][0];
-      expect(savedShift.status).toBe(ShiftStatus.CLOSED);
+      expect(savedShift.status).toBe(ShiftStatus.PENDING_SETTLEMENT);
       expect(savedShift.endTime).toBeInstanceOf(Date);
+      expect(savedShift.codSubmitted).toBe(150000);
+    });
+  });
+
+  // ─── closeShiftById() (Task 9.1) ──────────────────────────────────────────────
+
+  describe('closeShiftById()', () => {
+    it('should throw NotFoundException when shift does not exist', async () => {
+      mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
+      mockShiftRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.closeShiftById('non-existent-id', { codSubmitted: 100000 }, makeDriverJwt()),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw ForbiddenException when shift belongs to another driver', async () => {
+      const otherDriverShift = makeMockShift({ driverId: 'other-driver-uuid' });
+      mockDriverRepo.findOne.mockResolvedValue(makeMockDriver('user-driver-1'));
+      mockShiftRepo.findOne.mockResolvedValue(otherDriverShift);
+
+      await expect(
+        service.closeShiftById('shift-uuid-1', { codSubmitted: 100000 }, makeDriverJwt()),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should throw BadRequestException when shift is not OPEN', async () => {
+      const closedShift = makeMockShift({ status: ShiftStatus.CLOSED });
+      mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
+      mockShiftRepo.findOne.mockResolvedValue(closedShift);
+
+      await expect(
+        service.closeShiftById('shift-uuid-1', { codSubmitted: 100000 }, makeDriverJwt()),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should transition status to PENDING_SETTLEMENT, update driver to OFFLINE, and calculate codDifference', async () => {
+      const openShift = makeMockShift({
+        status: ShiftStatus.OPEN,
+        codCollected: 500000,
+      });
+
+      mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
+      mockShiftRepo.findOne.mockResolvedValue(openShift);
+      mockShiftRepo.save.mockImplementation((s: Shift) => Promise.resolve(s));
+      mockDriverRepo.update.mockResolvedValue({});
+
+      const result = await service.closeShiftById(
+        'shift-uuid-1',
+        { codSubmitted: 450000, notes: 'Thiếu 50k lẻ' },
+        makeDriverJwt(),
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.shift.status).toBe(ShiftStatus.PENDING_SETTLEMENT);
+      expect(result.summary.codCollected).toBe(500000);
+      expect(result.summary.codSubmitted).toBe(450000);
+      expect(result.summary.codDifference).toBe(50000); // 500000 - 450000
+      expect(mockDriverRepo.update).toHaveBeenCalledWith(
+        { userId: 'user-driver-1' },
+        { currentShiftStatus: DriverShiftStatus.OFFLINE },
+      );
+    });
+
+    it('should warn when pending stops exist on active route', async () => {
+      const openShift = makeMockShift({ status: ShiftStatus.OPEN, codCollected: 200000 });
+      mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
+      mockShiftRepo.findOne.mockResolvedValue(openShift);
+      mockShiftRepo.save.mockImplementation((s: Shift) => Promise.resolve(s));
+      mockDriverRepo.update.mockResolvedValue({});
+
+      // Mock active route found and has 2 pending stops
+      mockRouteRepo.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(makeMockRoute()),
+      });
+      mockStopRepo.count.mockResolvedValue(2);
+
+      const result = await service.closeShiftById(
+        'shift-uuid-1',
+        { codSubmitted: 200000 },
+        makeDriverJwt(),
+      );
+
+      expect(result.summary.pendingStopsWarning).toBe('Còn 2 điểm dừng chưa hoàn thành');
+      expect(result.summary.codDifference).toBe(0);
     });
   });
 
@@ -370,10 +474,11 @@ describe('ShiftsService', () => {
       expect(result.activeShift).toBeNull();
       expect(result.assignedOrdersCount).toBe(0);
       expect(result.deliveredOrdersCount).toBe(0);
+      expect(result.failedOrdersCount).toBe(0);
       expect(result.pendingCodAmount).toBe(0);
     });
 
-    it('should count delivered orders and accumulate COD amount', async () => {
+    it('should count delivered orders, failed orders, and accumulate COD amount', async () => {
       const freshDriver = {
         ...makeMockDriver(),
         currentShiftStatus: DriverShiftStatus.ONLINE_READY,
@@ -384,7 +489,7 @@ describe('ShiftsService', () => {
 
       const stops = [
         makeMockStop(1, OrderStatus.DELIVERED), // cod: 100000
-        makeMockStop(2, OrderStatus.ASSIGNED), // not delivered
+        makeMockStop(2, OrderStatus.FAILED), // failed
         makeMockStop(3, OrderStatus.DELIVERED), // cod: 100000
       ];
       mockStopRepo.find.mockResolvedValue(stops);
@@ -393,6 +498,7 @@ describe('ShiftsService', () => {
 
       expect(result.assignedOrdersCount).toBe(3);
       expect(result.deliveredOrdersCount).toBe(2);
+      expect(result.failedOrdersCount).toBe(1);
       expect(result.pendingCodAmount).toBe(200000); // 2 × 100000
     });
   });
