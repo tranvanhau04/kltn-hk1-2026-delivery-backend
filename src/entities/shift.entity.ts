@@ -11,6 +11,7 @@ import { Driver } from './driver.entity';
 
 export enum ShiftStatus {
   OPEN = 'OPEN',
+  PENDING_SETTLEMENT = 'PENDING_SETTLEMENT',
   CLOSED = 'CLOSED',
 }
 
