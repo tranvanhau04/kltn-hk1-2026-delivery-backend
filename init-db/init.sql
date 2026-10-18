@@ -221,12 +221,14 @@ CREATE TABLE `proof_of_deliveries` (
 -- 12. BẢNG LOG TỌA ĐỘ GPS REALTIME (TRACKING_LOGS)
 -- Thêm shift_id FK để liên kết bản ghi GPS với ca làm việc tương ứng theo ERD
 CREATE TABLE `tracking_logs` (
-    `id`        VARCHAR(36)    NOT NULL PRIMARY KEY,
-    `driver_id` VARCHAR(36)    NOT NULL,
-    `shift_id`  VARCHAR(36)    NULL     COMMENT 'ca làm việc khi ghi nhận tọa độ, nullable',
-    `latitude`  DECIMAL(10, 7) NOT NULL,
-    `longitude` DECIMAL(10, 7) NOT NULL,
-    `timestamp` TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `id`            VARCHAR(36)    NOT NULL PRIMARY KEY,
+    `driver_id`     VARCHAR(36)    NOT NULL,
+    `shift_id`      VARCHAR(36)    NULL     COMMENT 'ca làm việc khi ghi nhận tọa độ, nullable',
+    `latitude`      DECIMAL(10, 7) NOT NULL,
+    `longitude`     DECIMAL(10, 7) NOT NULL,
+    `battery_level` INT            NULL     COMMENT 'mức pin của thiết bị tài xế (0-100)',
+    `timestamp`     TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `created_at`    TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT `fk_tracking_driver` FOREIGN KEY (`driver_id`) REFERENCES `drivers` (`user_id`) ON DELETE CASCADE,
     CONSTRAINT `fk_tracking_shift`  FOREIGN KEY (`shift_id`)  REFERENCES `shifts`  (`id`)      ON DELETE SET NULL,
     CONSTRAINT `chk_tracking_lat`   CHECK (`latitude`  BETWEEN -90  AND 90),

@@ -10,18 +10,25 @@ exports.TrackingModule = void 0;
 const common_1 = require("@nestjs/common");
 const typeorm_1 = require("@nestjs/typeorm");
 const tracking_controller_1 = require("./tracking.controller");
+const tracking_gateway_1 = require("./tracking.gateway");
 const tracking_log_entity_1 = require("../entities/tracking-log.entity");
+const shift_entity_1 = require("../entities/shift.entity");
 const driver_entity_1 = require("../entities/driver.entity");
 const route_entity_1 = require("../entities/route.entity");
 const stop_entity_1 = require("../entities/stop.entity");
 const user_entity_1 = require("../entities/user.entity");
+const auth_module_1 = require("../auth/auth.module");
 let TrackingModule = class TrackingModule {
 };
 exports.TrackingModule = TrackingModule;
 exports.TrackingModule = TrackingModule = __decorate([
     (0, common_1.Module)({
-        imports: [typeorm_1.TypeOrmModule.forFeature([tracking_log_entity_1.TrackingLog, driver_entity_1.Driver, route_entity_1.Route, stop_entity_1.Stop, user_entity_1.User])],
+        imports: [
+            typeorm_1.TypeOrmModule.forFeature([tracking_log_entity_1.TrackingLog, shift_entity_1.Shift, driver_entity_1.Driver, route_entity_1.Route, stop_entity_1.Stop, user_entity_1.User]),
+            auth_module_1.AuthModule,
+        ],
         controllers: [tracking_controller_1.TrackingController],
+        providers: [tracking_gateway_1.TrackingGateway],
     })
 ], TrackingModule);
 //# sourceMappingURL=tracking.module.js.map
