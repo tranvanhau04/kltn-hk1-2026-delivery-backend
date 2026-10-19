@@ -202,7 +202,7 @@ export class ShiftsService {
 
     this.logger.log(
       `Driver ${driver.userId} closed shift ${saved.id} → PENDING_SETTLEMENT ` +
-      `(collected=${codCollected}, submitted=${codSubmitted}, diff=${codDifference})`,
+        `(collected=${codCollected}, submitted=${codSubmitted}, diff=${codDifference})`,
     );
 
     return {
@@ -214,9 +214,7 @@ export class ShiftsService {
         codSubmitted,
         codDifference,
         pendingStopsWarning:
-          pendingStopsCount > 0
-            ? `Còn ${pendingStopsCount} điểm dừng chưa hoàn thành`
-            : null,
+          pendingStopsCount > 0 ? `Còn ${pendingStopsCount} điểm dừng chưa hoàn thành` : null,
       },
     };
   }
