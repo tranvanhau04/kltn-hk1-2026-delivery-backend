@@ -30,6 +30,10 @@ interface JwtPayload {
   role: UserRole;
 }
 
+interface AuthenticatedSocket extends Socket {
+  user?: JwtPayload;
+}
+
 /**
  * TrackingGateway — Socket.io WebSocket gateway for real-time driver location tracking.
  *
@@ -52,7 +56,6 @@ interface JwtPayload {
   cors: {
     origin: '*',
     methods: ['GET', 'POST'],
-    credentials: false,
   },
   namespace: '/',
 })
@@ -82,9 +85,13 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   async handleConnection(client: Socket): Promise<void> {
     try {
       // Extract token from handshake.auth.token or Authorization header
-      const token =
-        client.handshake.auth?.token ||
-        client.handshake.headers?.authorization?.replace('Bearer ', '');
+      const auth = client.handshake.auth as Record<string, unknown> | undefined;
+      const authToken = typeof auth?.token === 'string' ? auth.token : undefined;
+      const rawAuthHeader = client.handshake.headers?.authorization;
+      const authHeader =
+        typeof rawAuthHeader === 'string' ? rawAuthHeader.replace('Bearer ', '') : undefined;
+
+      const token: string | undefined = authToken || authHeader;
 
       if (!token) {
         this.logger.warn(`[WS] Client ${client.id} rejected: no token provided`);
@@ -105,7 +112,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       }
 
       // Store user info on the socket for later use in message handlers
-      (client as any).user = payload;
+      (client as AuthenticatedSocket).user = payload;
 
       const { sub: userId, role } = payload;
 
@@ -113,13 +120,16 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
         // Driver joins their own personal room and the shared drivers room
         await client.join('active_drivers');
         await client.join(`driver_${userId}`);
-        this.logger.log(`[WS] DRIVER ${userId} connected → rooms: active_drivers, driver_${userId}`);
+        this.logger.log(
+          `[WS] DRIVER ${userId} connected → rooms: active_drivers, driver_${userId}`,
+        );
       } else if (role === UserRole.ADMIN || role === UserRole.DISPATCHER) {
         // Admin/Dispatcher joins dispatchers room to receive broadcasts
         await client.join('dispatchers');
         this.logger.log(`[WS] ${role} ${userId} connected → room: dispatchers`);
       } else {
-        this.logger.warn(`[WS] Client ${client.id} has unknown role: ${role}`);
+        const unknownRole = String(role);
+        this.logger.warn(`[WS] Client ${client.id} has unknown role: ${unknownRole}`);
         client.disconnect(true);
         return;
       }
@@ -138,7 +148,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   handleDisconnect(client: Socket): void {
-    const user = (client as any).user as JwtPayload | undefined;
+    const user = (client as AuthenticatedSocket).user;
     if (user) {
       this.logger.log(`[WS] User ${user.sub} (${user.role}) disconnected (socket: ${client.id})`);
     } else {
@@ -167,7 +177,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: UpdateLocationPayload,
   ): Promise<{ success: boolean; message?: string }> {
-    const user = (client as any).user as JwtPayload | undefined;
+    const user = (client as AuthenticatedSocket).user;
 
     // Guard: must be authenticated
     if (!user) {
