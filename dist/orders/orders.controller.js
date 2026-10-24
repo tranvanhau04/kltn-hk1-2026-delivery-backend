@@ -38,6 +38,9 @@ let OrdersController = class OrdersController {
     findOne(id) {
         return this.ordersService.findById(id);
     }
+    getOrderPod(id) {
+        return this.ordersService.getOrderPod(id);
+    }
     updateCoordinates(id, dto) {
         return this.ordersService.updateCoordinates(id, dto);
     }
@@ -87,6 +90,14 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], OrdersController.prototype, "findOne", null);
+__decorate([
+    (0, common_1.Get)(':id/pod'),
+    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),
+    __param(0, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], OrdersController.prototype, "getOrderPod", null);
 __decorate([
     (0, common_1.Patch)(':id/coordinates'),
     (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),

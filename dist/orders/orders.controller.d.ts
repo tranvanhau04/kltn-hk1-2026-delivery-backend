@@ -8,11 +8,24 @@ export declare class OrdersController {
     constructor(ordersService: OrdersService);
     create(dto: CreateOrderDto): Promise<Order>;
     findAll(query: QueryOrderDto): Promise<{
-        data: Order[];
+        data: any[];
         total: number;
     }>;
     findPool(): Promise<Order[]>;
     findOne(id: string): Promise<Order>;
+    getOrderPod(id: string): Promise<{
+        hasPod: boolean;
+        photoUrl?: undefined;
+        codCollected?: undefined;
+        failureReason?: undefined;
+        confirmedAt?: undefined;
+    } | {
+        hasPod: boolean;
+        photoUrl: string | null;
+        codCollected: number;
+        failureReason: string | null;
+        confirmedAt: Date;
+    }>;
     updateCoordinates(id: string, dto: UpdateCoordinatesDto): Promise<Order>;
     importExcel(file: Express.Multer.File): Promise<{
         totalRows: number;

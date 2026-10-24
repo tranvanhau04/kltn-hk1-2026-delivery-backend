@@ -6,6 +6,8 @@ import * as crypto from 'crypto';
 import { Order, OrderStatus } from '../entities/order.entity';
 import { Depot } from '../entities/depot.entity';
 import { OrderStatusHistory } from '../entities/order-status-history.entity';
+import { Stop } from '../entities/stop.entity';
+import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
 import { GeocodingService } from '../geocoding/geocoding.service';
 import { UpdateCoordinatesDto } from './dto/update-coordinates.dto';
 import { QueryOrderDto } from './dto/query-order.dto';
@@ -24,14 +26,23 @@ export class OrdersService {
     private readonly depotRepo: Repository<Depot>,
     @InjectRepository(OrderStatusHistory)
     private readonly historyRepo: Repository<OrderStatusHistory>,
+    @InjectRepository(Stop)
+    private readonly stopRepo: Repository<Stop>,
+    @InjectRepository(ProofOfDelivery)
+    private readonly podRepo: Repository<ProofOfDelivery>,
     private readonly geocodingService: GeocodingService,
     private readonly dataSource: DataSource,
   ) {}
 
   /** Returns all orders based on query filters */
-  async findAll(query: QueryOrderDto): Promise<{ data: Order[]; total: number }> {
+  async findAll(query: QueryOrderDto): Promise<{ data: any[]; total: number }> {
     const { status, zoneId, search, page = 1, limit = 50 } = query;
-    const qb = this.orderRepo.createQueryBuilder('order');
+    const qb = this.orderRepo.createQueryBuilder('order')
+      .leftJoin('stops', 'stop', 'stop.order_id = order.id')
+      .leftJoin('routes', 'route', 'route.id = stop.route_id')
+      .leftJoin('users', 'driver_user', 'driver_user.id = route.driver_id')
+      .addSelect('driver_user.full_name', 'driverName')
+      .addSelect('route.driver_id', 'driverId');
 
     if (status) {
       if (Array.isArray(status)) {
@@ -60,7 +71,20 @@ export class OrdersService {
     qb.skip((page - 1) * limit);
     qb.take(limit);
 
-    const [data, total] = await qb.getManyAndCount();
+    const [rawAndEntities, total] = await Promise.all([
+      qb.getRawAndEntities(),
+      qb.getCount(),
+    ]);
+
+    const { entities, raw } = rawAndEntities;
+    const data = entities.map((entity, index) => {
+      const rawItem = raw[index];
+      return {
+        ...entity,
+        driverName: rawItem?.driverName ?? rawItem?.driver_user_full_name ?? null,
+        driverId: rawItem?.driverId ?? rawItem?.route_driver_id ?? null,
+      };
+    });
     return { data, total };
   }
 
@@ -73,12 +97,26 @@ export class OrdersService {
   }
 
   /** Returns a single order by ID */
-  async findById(id: string): Promise<Order> {
-    const order = await this.orderRepo.findOne({ where: { id } });
-    if (!order) {
+  async findById(id: string): Promise<any> {
+    const qb = this.orderRepo.createQueryBuilder('order')
+      .leftJoin('stops', 'stop', 'stop.order_id = order.id')
+      .leftJoin('routes', 'route', 'route.id = stop.route_id')
+      .leftJoin('users', 'driver_user', 'driver_user.id = route.driver_id')
+      .addSelect('driver_user.full_name', 'driverName')
+      .addSelect('route.driver_id', 'driverId')
+      .where('order.id = :id', { id });
+
+    const { entities, raw } = await qb.getRawAndEntities();
+    if (!entities.length) {
       throw new NotFoundException(`Không tìm thấy đơn hàng với ID: ${id}`);
     }
-    return order;
+    const order = entities[0];
+    const rawItem = raw[0];
+    return {
+      ...order,
+      driverName: rawItem?.driverName ?? rawItem?.driver_user_full_name ?? null,
+      driverId: rawItem?.driverId ?? rawItem?.route_driver_id ?? null,
+    };
   }
 
   /** Creates a single new order */
@@ -296,6 +334,33 @@ export class OrdersService {
       importedCount: validRows.length,
       failedCount,
       errors,
+    };
+  }
+
+  /**
+   * Fetch proof of delivery (POD) for an order
+   */
+  async getOrderPod(orderId: string) {
+    const stop = await this.stopRepo.findOne({ where: { orderId } });
+    if (!stop) {
+      return { hasPod: false };
+    }
+
+    const pod = await this.podRepo.findOne({
+      where: { stopId: stop.id },
+      order: { confirmedAt: 'DESC' },
+    });
+
+    if (!pod) {
+      return { hasPod: false };
+    }
+
+    return {
+      hasPod: true,
+      photoUrl: pod.photoUrl,
+      codCollected: pod.codCollected ? Number(pod.codCollected) : 0,
+      failureReason: pod.failureReason,
+      confirmedAt: pod.confirmedAt,
     };
   }
 }
