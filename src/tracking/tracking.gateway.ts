@@ -12,7 +12,9 @@ import { Server, Socket } from 'socket.io';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
-import { Logger } from '@nestjs/common';
+import { Logger, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { WsThrottlerGuard } from './guards/ws-throttler.guard';
 import { TrackingLog } from '../entities/tracking-log.entity';
 import { Shift, ShiftStatus } from '../entities/shift.entity';
 import { User, UserRole } from '../entities/user.entity';
@@ -116,20 +118,23 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
       const { sub: userId, role } = payload;
 
-      if (role === UserRole.DRIVER) {
-        // Driver joins their own personal room and the shared drivers room
+      // Task 12.1 Task 2: Strictly check JWT payload role
+      // - DISPATCHER or ADMIN -> dispatchers room
+      // - DRIVER -> active_drivers room
+      // - Invalid role -> disconnect immediately
+      const roleStr = String(role);
+      if (roleStr === UserRole.DISPATCHER || roleStr === UserRole.ADMIN) {
+        await client.join('dispatchers');
+        this.logger.log(`[WS] ${role} ${userId} connected → room: dispatchers`);
+      } else if (roleStr === UserRole.DRIVER) {
         await client.join('active_drivers');
         await client.join(`driver_${userId}`);
         this.logger.log(
           `[WS] DRIVER ${userId} connected → rooms: active_drivers, driver_${userId}`,
         );
-      } else if (role === UserRole.ADMIN || role === UserRole.DISPATCHER) {
-        // Admin/Dispatcher joins dispatchers room to receive broadcasts
-        await client.join('dispatchers');
-        this.logger.log(`[WS] ${role} ${userId} connected → room: dispatchers`);
       } else {
-        const unknownRole = String(role);
-        this.logger.warn(`[WS] Client ${client.id} has unknown role: ${unknownRole}`);
+        this.logger.warn(`[WS] Client ${client.id} rejected: invalid role ${roleStr}`);
+        client.emit('connection_error', { message: 'Unauthorized: invalid role' });
         client.disconnect(true);
         return;
       }
@@ -161,17 +166,22 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
-   * Task 9.2: Receives real-time GPS location from authenticated DRIVER.
+   * Task 9.2 & Task 12.1: Receives real-time GPS location from authenticated DRIVER.
+   *
+   * Rate limiting: Exactly 20 requests per minute via WsThrottlerGuard.
    *
    * Payload: { shiftId?, latitude, longitude, batteryLevel? }
    *
    * Processing:
-   *   1. Validate sender is DRIVER
-   *   2. Validate payload coordinates
-   *   3. Persist to tracking_logs table
-   *   4. Broadcast `driver_location_updated` to `dispatchers` room
-   *   5. Return acknowledgement to driver
+   *   1. Validate rate limit (WsThrottlerGuard)
+   *   2. Validate sender is DRIVER
+   *   3. Validate payload coordinates
+   *   4. Persist to tracking_logs table
+   *   5. Broadcast `driver_location_updated` to `dispatchers` room
+   *   6. Return acknowledgement to driver
    */
+  @UseGuards(WsThrottlerGuard)
+  @Throttle({ default: { limit: 20, ttl: 60000 }, ws: { limit: 20, ttl: 60000 } })
   @SubscribeMessage('update_location')
   async handleUpdateLocation(
     @ConnectedSocket() client: Socket,

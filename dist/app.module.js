@@ -26,6 +26,7 @@ const shifts_module_1 = require("./shifts/shifts.module");
 const stops_module_1 = require("./stops/stops.module");
 const jwt_auth_guard_1 = require("./auth/guards/jwt-auth.guard");
 const roles_guard_1 = require("./auth/guards/roles.guard");
+const throttler_1 = require("@nestjs/throttler");
 const reports_module_1 = require("./reports/reports.module");
 let AppModule = class AppModule {
 };
@@ -36,6 +37,18 @@ exports.AppModule = AppModule = __decorate([
             config_1.ConfigModule.forRoot({
                 isGlobal: true,
             }),
+            throttler_1.ThrottlerModule.forRoot([
+                {
+                    name: 'default',
+                    ttl: 60000,
+                    limit: 20,
+                },
+                {
+                    name: 'ws',
+                    ttl: 60000,
+                    limit: 20,
+                },
+            ]),
             auth_module_1.AuthModule,
             users_module_1.UsersModule,
             database_module_1.DatabaseModule,
