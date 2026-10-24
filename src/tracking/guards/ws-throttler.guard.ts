@@ -1,10 +1,4 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  Injectable,
-  Logger,
-  Optional,
-} from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, Logger, Optional } from '@nestjs/common';
 import { ThrottlerStorageService } from '@nestjs/throttler';
 import { WsException } from '@nestjs/websockets';
 import { Socket } from 'socket.io';

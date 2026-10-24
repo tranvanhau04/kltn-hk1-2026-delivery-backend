@@ -123,10 +123,10 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       // - DRIVER -> active_drivers room
       // - Invalid role -> disconnect immediately
       const roleStr = String(role);
-      if (roleStr === UserRole.DISPATCHER || roleStr === UserRole.ADMIN) {
+      if (roleStr === 'DISPATCHER' || roleStr === 'ADMIN') {
         await client.join('dispatchers');
-        this.logger.log(`[WS] ${role} ${userId} connected → room: dispatchers`);
-      } else if (roleStr === UserRole.DRIVER) {
+        this.logger.log(`[WS] ${roleStr} ${userId} connected → room: dispatchers`);
+      } else if (roleStr === 'DRIVER') {
         await client.join('active_drivers');
         await client.join(`driver_${userId}`);
         this.logger.log(
