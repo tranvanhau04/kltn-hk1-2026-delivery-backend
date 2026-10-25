@@ -17,6 +17,7 @@ import { ShiftsModule } from './shifts/shifts.module';
 import { StopsModule } from './stops/stops.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { ReportsModule } from './reports/reports.module';
 
 @Module({
@@ -24,6 +25,18 @@ import { ReportsModule } from './reports/reports.module';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: 60000,
+        limit: 20,
+      },
+      {
+        name: 'ws',
+        ttl: 60000,
+        limit: 20,
+      },
+    ]),
     AuthModule,
     UsersModule,
     DatabaseModule,
