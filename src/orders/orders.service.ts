@@ -17,6 +17,18 @@ import { CreateOrderDto } from './dto/create-order.dto';
 const DEFAULT_DEPOT_LAT = 10.8468;
 const DEFAULT_DEPOT_LNG = 106.6752;
 
+interface RawOrderWithDriver {
+  driverName?: string | null;
+  driver_user_full_name?: string | null;
+  driverId?: string | null;
+  route_driver_id?: string | null;
+}
+
+export type OrderWithDriver = Order & {
+  driverName: string | null;
+  driverId: string | null;
+};
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -35,9 +47,10 @@ export class OrdersService {
   ) {}
 
   /** Returns all orders based on query filters */
-  async findAll(query: QueryOrderDto): Promise<{ data: any[]; total: number }> {
+  async findAll(query: QueryOrderDto): Promise<{ data: OrderWithDriver[]; total: number }> {
     const { status, zoneId, search, page = 1, limit = 50 } = query;
-    const qb = this.orderRepo.createQueryBuilder('order')
+    const qb = this.orderRepo
+      .createQueryBuilder('order')
       .leftJoin('stops', 'stop', 'stop.order_id = order.id')
       .leftJoin('routes', 'route', 'route.id = stop.route_id')
       .leftJoin('users', 'driver_user', 'driver_user.id = route.driver_id')
@@ -71,19 +84,19 @@ export class OrdersService {
     qb.skip((page - 1) * limit);
     qb.take(limit);
 
-    const [rawAndEntities, total] = await Promise.all([
-      qb.getRawAndEntities(),
-      qb.getCount(),
-    ]);
+    const [rawAndEntities, total] = await Promise.all([qb.getRawAndEntities(), qb.getCount()]);
 
     const { entities, raw } = rawAndEntities;
-    const data = entities.map((entity, index) => {
-      const rawItem = raw[index];
-      return {
-        ...entity,
-        driverName: rawItem?.driverName ?? rawItem?.driver_user_full_name ?? null,
-        driverId: rawItem?.driverId ?? rawItem?.route_driver_id ?? null,
-      };
+    const rawTyped = raw as RawOrderWithDriver[];
+    const data: OrderWithDriver[] = entities.map((entity, index) => {
+      const rawItem = rawTyped[index];
+      const driverName: string | null =
+        rawItem?.driverName ?? rawItem?.driver_user_full_name ?? null;
+      const driverId: string | null = rawItem?.driverId ?? rawItem?.route_driver_id ?? null;
+      return Object.assign(new Order(), entity, {
+        driverName,
+        driverId,
+      });
     });
     return { data, total };
   }
@@ -97,8 +110,9 @@ export class OrdersService {
   }
 
   /** Returns a single order by ID */
-  async findById(id: string): Promise<any> {
-    const qb = this.orderRepo.createQueryBuilder('order')
+  async findById(id: string): Promise<OrderWithDriver> {
+    const qb = this.orderRepo
+      .createQueryBuilder('order')
       .leftJoin('stops', 'stop', 'stop.order_id = order.id')
       .leftJoin('routes', 'route', 'route.id = stop.route_id')
       .leftJoin('users', 'driver_user', 'driver_user.id = route.driver_id')
@@ -111,12 +125,13 @@ export class OrdersService {
       throw new NotFoundException(`Không tìm thấy đơn hàng với ID: ${id}`);
     }
     const order = entities[0];
-    const rawItem = raw[0];
-    return {
-      ...order,
-      driverName: rawItem?.driverName ?? rawItem?.driver_user_full_name ?? null,
-      driverId: rawItem?.driverId ?? rawItem?.route_driver_id ?? null,
-    };
+    const rawItem = (raw as RawOrderWithDriver[])[0];
+    const driverName: string | null = rawItem?.driverName ?? rawItem?.driver_user_full_name ?? null;
+    const driverId: string | null = rawItem?.driverId ?? rawItem?.route_driver_id ?? null;
+    return Object.assign(new Order(), order, {
+      driverName,
+      driverId,
+    });
   }
 
   /** Creates a single new order */
