@@ -6,6 +6,7 @@ import {
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm';
 import { Driver } from './driver.entity';
 
@@ -27,6 +28,7 @@ export enum ShiftStatus {
  *   created_at, updated_at
  */
 @Entity('shifts')
+@Index('idx_shifts_driver_status', ['driverId', 'status'])
 export class Shift {
   @PrimaryGeneratedColumn('uuid')
   id: string;

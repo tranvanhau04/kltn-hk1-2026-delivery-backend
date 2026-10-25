@@ -50,6 +50,13 @@ export class OrdersController {
     return this.ordersService.findById(id);
   }
 
+  /** GET /api/orders/:id/pod — fetch POD proof for an order */
+  @Get(':id/pod')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  getOrderPod(@Param('id') id: string) {
+    return this.ordersService.getOrderPod(id);
+  }
+
   /**
    * PATCH /api/orders/:id/coordinates
    * Allows a Dispatcher to manually adjust delivery coordinates.
