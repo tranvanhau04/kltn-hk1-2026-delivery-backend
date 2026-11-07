@@ -8,7 +8,7 @@ export declare class OrdersController {
     constructor(ordersService: OrdersService);
     create(dto: CreateOrderDto): Promise<Order>;
     findAll(query: QueryOrderDto): Promise<{
-        data: any[];
+        data: import("./orders.service").OrderWithDriver[];
         total: number;
     }>;
     findPool(): Promise<Order[]>;
