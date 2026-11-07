@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Order, OrderStatus } from '../entities/order.entity';
 import { Shift, ShiftStatus } from '../entities/shift.entity';
 import { Driver, DriverShiftStatus } from '../entities/driver.entity';
@@ -18,6 +18,7 @@ export class ReportsService {
     private readonly shiftRepo: Repository<Shift>,
     @InjectRepository(Driver)
     private readonly driverRepo: Repository<Driver>,
+    private readonly dataSource: DataSource,
   ) {}
 
   private getDateRange(period: 'week' | 'month' | 'custom', startDate?: string, endDate?: string) {
@@ -42,69 +43,96 @@ export class ReportsService {
   async getKpis(period: 'week' | 'month' | 'custom', startDate?: string, endDate?: string) {
     const { start, end } = this.getDateRange(period, startDate, endDate);
 
-    // 1. Core KPI Aggregations
-    const orders = await this.orderRepo.find({
-      where: {
-        createdAt: Between(start, end),
-      },
-    });
+    // 1. Core KPI Aggregations using Native SQL
+    const kpiRow = await this.orderRepo
+      .createQueryBuilder('o')
+      .select([
+        'COUNT(o.id) AS totalOrders',
+        `SUM(CASE WHEN o.status = :deliveredStatus THEN 1 ELSE 0 END) AS successOrders`,
+        `SUM(CASE WHEN o.status = :failedStatus THEN 1 ELSE 0 END) AS failedOrders`,
+        `COALESCE(SUM(CASE WHEN o.status = :deliveredStatus THEN o.cod_amount ELSE 0 END), 0) AS totalCodCollected`,
+      ])
+      .where('o.created_at >= :start AND o.created_at <= :end', {
+        start,
+        end,
+        deliveredStatus: OrderStatus.DELIVERED,
+        failedStatus: OrderStatus.FAILED,
+      })
+      .getRawOne<{
+        totalOrders?: string | number;
+        successOrders?: string | number;
+        failedOrders?: string | number;
+        totalCodCollected?: string | number;
+      }>();
 
-    const totalOrders = orders.length;
-    const successOrders = orders.filter((o) => o.status === OrderStatus.DELIVERED).length;
-    const failedOrders = orders.filter((o) => o.status === OrderStatus.FAILED).length;
+    const totalOrders = Number(kpiRow?.totalOrders || 0);
+    const successOrders = Number(kpiRow?.successOrders || 0);
+    const failedOrders = Number(kpiRow?.failedOrders || 0);
     const successRate =
       totalOrders > 0 ? Number(((successOrders / totalOrders) * 100).toFixed(1)) : 0;
-    const totalCodCollected = orders
-      .filter((o) => o.status === OrderStatus.DELIVERED)
-      .reduce((sum, o) => sum + Number(o.codAmount || 0), 0);
+    const totalCodCollected = Number(kpiRow?.totalCodCollected || 0);
 
-    // 2. Weekly Order Trends
-    // Group by day of week (Monday to Sunday)
-    const days = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
-    const trendsMap = new Map<string, number>();
+    // 2. Weekly Order Trends using Native SQL Aggregation
+    // WEEKDAY in MySQL: 0 = Mon, 1 = Tue, 2 = Wed, 3 = Thu, 4 = Fri, 5 = Sat, 6 = Sun
+    const trendRows = await this.orderRepo
+      .createQueryBuilder('o')
+      .select(['WEEKDAY(o.created_at) AS weekday', 'COUNT(o.id) AS count'])
+      .where('o.created_at >= :start AND o.created_at <= :end', { start, end })
+      .groupBy('WEEKDAY(o.created_at)')
+      .getRawMany<{ weekday: string | number; count: string | number }>();
 
-    // Initialize map
-    for (let i = 1; i <= 6; i++) trendsMap.set(days[i], 0);
-    trendsMap.set(days[0], 0);
+    const dayLabels = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+    const trendsMap = new Map<number, number>();
+    for (let i = 0; i < 7; i++) {
+      trendsMap.set(i, 0);
+    }
 
-    orders.forEach((o) => {
-      const dayName = days[o.createdAt.getDay()];
-      trendsMap.set(dayName, trendsMap.get(dayName)! + 1);
+    trendRows.forEach((row) => {
+      const w = Number(row.weekday);
+      if (!isNaN(w) && w >= 0 && w <= 6) {
+        trendsMap.set(w, Number(row.count) || 0);
+      }
     });
 
-    const weeklyOrderTrends = [
-      { label: 'T2', count: trendsMap.get('T2') },
-      { label: 'T3', count: trendsMap.get('T3') },
-      { label: 'T4', count: trendsMap.get('T4') },
-      { label: 'T5', count: trendsMap.get('T5') },
-      { label: 'T6', count: trendsMap.get('T6') },
-      { label: 'T7', count: trendsMap.get('T7') },
-      { label: 'CN', count: trendsMap.get('CN') },
-    ];
-
-    // 3. Shift Reconciliation Overview
-    const shifts = await this.shiftRepo.find({
-      where: {
-        startTime: Between(start, end),
-      },
-      relations: ['driver'],
-      order: {
-        startTime: 'DESC',
-      },
-    });
-
-    const shiftOverview = shifts.map((shift) => ({
-      shiftId: shift.id,
-      driverName: `Tài xế (ID: ${shift.driverId})`,
-      licensePlate: shift.driver?.licensePlate || 'N/A',
-      startTime: shift.startTime,
-      endTime: shift.endTime,
-      codCollected: Number(shift.codCollected || 0),
-      codSubmitted: Number(shift.codSubmitted || 0),
-      reconciliationStatus: shift.reconciledAt ? 'RECONCILED' : 'PENDING',
-      reconciledBy: shift.reconciledBy,
-      reconciledAt: shift.reconciledAt,
+    const weeklyOrderTrends = dayLabels.map((label, index) => ({
+      label,
+      count: trendsMap.get(index) ?? 0,
     }));
+
+    // 3. Shift Reconciliation Overview - Joined with users for real driver name
+    const shiftsQuery = this.shiftRepo
+      .createQueryBuilder('shift')
+      .leftJoinAndSelect('shift.driver', 'driver')
+      .leftJoin('users', 'u', 'u.id = shift.driver_id')
+      .addSelect('u.full_name', 'driverFullName')
+      .where('shift.start_time >= :start AND shift.start_time <= :end', { start, end })
+      .orderBy('shift.start_time', 'DESC');
+
+    const { entities: shifts, raw: rawShifts } = await shiftsQuery.getRawAndEntities<{
+      driverFullName?: string;
+      u_full_name?: string;
+    }>();
+
+    const shiftOverview = shifts.map((shift, idx) => {
+      const raw = rawShifts[idx];
+      const realDriverName =
+        raw?.driverFullName ||
+        raw?.u_full_name ||
+        (shift.driverId ? `Tài xế #${shift.driverId.slice(0, 8)}` : 'Chưa phân công');
+
+      return {
+        shiftId: shift.id,
+        driverName: realDriverName,
+        licensePlate: shift.driver?.licensePlate || 'N/A',
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        codCollected: Number(shift.codCollected || 0),
+        codSubmitted: Number(shift.codSubmitted || 0),
+        reconciliationStatus: shift.reconciledAt ? 'RECONCILED' : 'PENDING',
+        reconciledBy: shift.reconciledBy,
+        reconciledAt: shift.reconciledAt,
+      };
+    });
 
     return {
       totalOrders,
@@ -117,51 +145,61 @@ export class ReportsService {
     };
   }
 
+  /**
+   * Reconcile shift with pessimistic write lock and transaction
+   * Guarantees atomicity and prevents concurrent reconciliation race conditions
+   */
   async reconcileShift(shiftId: string, dto: ReconcileShiftDto, user: JwtPayload) {
-    const shift = await this.shiftRepo.findOne({
-      where: { id: shiftId },
-      relations: ['driver'],
+    return this.dataSource.transaction(async (manager) => {
+      // 1. Fetch shift with pessimistic locking to avoid concurrency anomalies
+      const shift = await manager.findOne(Shift, {
+        where: { id: shiftId },
+        relations: ['driver'],
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!shift) {
+        throw new NotFoundException('Không tìm thấy ca làm việc');
+      }
+
+      if (shift.status === ShiftStatus.CLOSED || shift.reconciledAt !== null) {
+        throw new BadRequestException('Ca làm việc này đã được đối soát trước đó');
+      }
+
+      // 2. Update shift reconciliation info
+      shift.codSubmitted = dto.submittedAmount;
+      shift.reconciledBy = user.sub;
+      shift.reconciledAt = new Date();
+      shift.status = ShiftStatus.CLOSED;
+
+      await manager.save(Shift, shift);
+
+      // 3. Atomically update Driver status to OFFLINE if not already
+      if (
+        shift.driver &&
+        (shift.driver.currentShiftStatus as unknown as DriverShiftStatus) !==
+          DriverShiftStatus.OFFLINE
+      ) {
+        shift.driver.currentShiftStatus = DriverShiftStatus.OFFLINE;
+        await manager.save(Driver, shift.driver);
+      }
+
+      const discrepancy = Number(shift.codCollected) - dto.submittedAmount;
+      let discrepancyMsg = '';
+      if (discrepancy > 0) {
+        discrepancyMsg = ` (Thiếu ${discrepancy.toLocaleString('vi-VN')} VNĐ)`;
+      } else if (discrepancy < 0) {
+        discrepancyMsg = ` (Dư ${Math.abs(discrepancy).toLocaleString('vi-VN')} VNĐ)`;
+      } else {
+        discrepancyMsg = ' (Khớp 100%)';
+      }
+
+      return {
+        success: true,
+        message: `Duyệt đối soát COD thành công${discrepancyMsg}`,
+        shift,
+      };
     });
-
-    if (!shift) {
-      throw new NotFoundException('Không tìm thấy ca làm việc');
-    }
-
-    if (shift.reconciledAt !== null) {
-      throw new BadRequestException('Ca làm việc này đã được đối soát trước đó');
-    }
-
-    shift.codSubmitted = dto.submittedAmount;
-    shift.reconciledBy = user.sub;
-    shift.reconciledAt = new Date();
-    shift.status = ShiftStatus.CLOSED;
-
-    // Save shift
-    await this.shiftRepo.save(shift);
-
-    // Update Driver if the shift was open
-    if (
-      shift.driver &&
-      (shift.driver.currentShiftStatus as unknown as DriverShiftStatus) !==
-        DriverShiftStatus.OFFLINE
-    ) {
-      shift.driver.currentShiftStatus = DriverShiftStatus.OFFLINE;
-      await this.driverRepo.save(shift.driver);
-    }
-
-    const discrepancy = Number(shift.codCollected) - dto.submittedAmount;
-    let discrepancyMsg = '';
-    if (discrepancy > 0) {
-      discrepancyMsg = ` (Thiếu ${discrepancy} VNĐ)`;
-    } else if (discrepancy < 0) {
-      discrepancyMsg = ` (Dư ${Math.abs(discrepancy)} VNĐ)`;
-    }
-
-    return {
-      success: true,
-      message: `Duyệt đối soát COD thành công${discrepancyMsg}`,
-      shift,
-    };
   }
 
   async generateExcelExport(
@@ -207,35 +245,49 @@ export class ReportsService {
     sheet1.getRow(4).font = { bold: true };
     sheet1.getRow(4).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
 
-    // Fetch data
+    // Fetch data with driver full name via users table join
     let shiftQuery = this.shiftRepo
       .createQueryBuilder('shift')
       .leftJoinAndSelect('shift.driver', 'driver')
-      .orderBy('shift.startTime', 'DESC');
+      .leftJoin('users', 'u', 'u.id = shift.driver_id')
+      .addSelect('u.full_name', 'driverFullName')
+      .orderBy('shift.start_time', 'DESC');
 
-    if (startDate)
-      shiftQuery = shiftQuery.andWhere('shift.startTime >= :startDate', {
+    if (startDate) {
+      shiftQuery = shiftQuery.andWhere('shift.start_time >= :startDate', {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         startDate: startOfDay(new Date(startDate)),
       });
-    if (endDate)
-      shiftQuery = shiftQuery.andWhere('shift.startTime <= :endDate', {
+    }
+    if (endDate) {
+      shiftQuery = shiftQuery.andWhere('shift.start_time <= :endDate', {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         endDate: endOfDay(new Date(endDate)),
       });
-    if (driverId) shiftQuery = shiftQuery.andWhere('shift.driverId = :driverId', { driverId });
+    }
+    if (driverId) {
+      shiftQuery = shiftQuery.andWhere('shift.driver_id = :driverId', { driverId });
+    }
 
-    const shifts = await shiftQuery.getMany();
+    const { entities: shifts, raw: rawShifts } = await shiftQuery.getRawAndEntities<{
+      driverFullName?: string;
+      u_full_name?: string;
+    }>();
 
     shifts.forEach((s, index) => {
       const codCollected = Number(s.codCollected || 0);
       const codSubmitted = Number(s.codSubmitted || 0);
       const diff = codSubmitted - codCollected;
+      const raw = rawShifts[index];
+      const realDriverName =
+        raw?.driverFullName ||
+        raw?.u_full_name ||
+        (s.driverId ? `Tài xế #${s.driverId.slice(0, 8)}` : 'Chưa phân công');
 
       const row = sheet1.addRow([
         index + 1,
         s.id,
-        `Tài xế (ID: ${s.driverId})`,
+        realDriverName,
         s.driver?.licensePlate || 'N/A',
         s.startTime ? new Date(s.startTime).toLocaleString('vi-VN') : '',
         s.endTime ? new Date(s.endTime).toLocaleString('vi-VN') : '',
@@ -286,19 +338,20 @@ export class ReportsService {
     sheet2.getRow(3).font = { bold: true };
     sheet2.getRow(3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
 
-    let orderQuery = this.orderRepo.createQueryBuilder('order').orderBy('order.updatedAt', 'DESC');
+    let orderQuery = this.orderRepo.createQueryBuilder('order').orderBy('order.updated_at', 'DESC');
 
-    if (startDate)
-      orderQuery = orderQuery.andWhere('order.updatedAt >= :startDate', {
+    if (startDate) {
+      orderQuery = orderQuery.andWhere('order.updated_at >= :startDate', {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         startDate: startOfDay(new Date(startDate)),
       });
-    if (endDate)
-      orderQuery = orderQuery.andWhere('order.updatedAt <= :endDate', {
+    }
+    if (endDate) {
+      orderQuery = orderQuery.andWhere('order.updated_at <= :endDate', {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         endDate: endOfDay(new Date(endDate)),
       });
-    // Note: Since Order does not have driverId natively, we omit driver filtering here or assume order.dispatcherId
+    }
 
     const orders = await orderQuery.getMany();
 

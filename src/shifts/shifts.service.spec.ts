@@ -13,6 +13,7 @@ import { Route } from '../entities/route.entity';
 import { Stop } from '../entities/stop.entity';
 import { Order, OrderStatus } from '../entities/order.entity';
 import { Depot } from '../entities/depot.entity';
+import { DataSource } from 'typeorm';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { UserRole } from '../entities/user.entity';
 
@@ -129,6 +130,22 @@ describe('ShiftsService', () => {
     findOne: jest.fn(),
   };
 
+  const mockEntityManager = {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+    findOne: jest.fn((_entity: unknown, options: unknown) => mockShiftRepo.findOne(options)),
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+    save: jest.fn((_entity: unknown, val: unknown) => mockShiftRepo.save(val)),
+    update: jest.fn((_entity: unknown, criteria: unknown, partial: unknown): Promise<unknown> =>
+      Promise.resolve(mockDriverRepo.update(criteria, partial)),
+    ),
+  };
+
+  const mockDataSource = {
+    transaction: jest.fn(async (cb: (manager: typeof mockEntityManager) => Promise<unknown>) => {
+      return cb(mockEntityManager);
+    }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -139,6 +156,7 @@ describe('ShiftsService', () => {
         { provide: getRepositoryToken(Stop), useValue: mockStopRepo },
         { provide: getRepositoryToken(Order), useValue: mockOrderRepo },
         { provide: getRepositoryToken(Depot), useValue: mockDepotRepo },
+        { provide: DataSource, useValue: mockDataSource },
       ],
     }).compile();
 
