@@ -76,11 +76,13 @@ export class TrackingController {
           order: { timestamp: 'DESC' },
         });
 
-        // Active route (IN_PROGRESS or PLANNED) ignoring date for testing
+        // Active route (ASSIGNED, IN_PROGRESS, PLANNED, CONFIRMED) ignoring date for testing
         const activeRoute = await this.routeRepo.findOne({
           where: [
+            { driverId: driver.userId, status: 'ASSIGNED' },
             { driverId: driver.userId, status: 'IN_PROGRESS' },
             { driverId: driver.userId, status: 'PLANNED' },
+            { driverId: driver.userId, status: 'CONFIRMED' },
           ],
           order: { routeDate: 'DESC', createdAt: 'DESC' },
         });
@@ -165,8 +167,16 @@ export class TrackingController {
    * Returns a clean 404-style response when no route is assigned for today — never returns mock data.
    */
   @Get('tracking/driver/:driverId/route-today')
+  async getDriverRouteToday(@Param('driverId') driverId: string) {
+    return this.findDriverRoute(driverId);
+  }
+
   @Get('driver/:driverId/route')
-  async getDriverRoute(@Param('driverId') driverId: string) {
+  async getDriverRouteAlias(@Param('driverId') driverId: string) {
+    return this.findDriverRoute(driverId);
+  }
+
+  private async findDriverRoute(driverId: string) {
     const driver = await this.driverRepo.findOne({ where: { userId: driverId } });
     if (!driver) {
       return {
@@ -180,8 +190,10 @@ export class TrackingController {
     // Get most recent active route for this driver (ignoring date for testing)
     const route = await this.routeRepo.findOne({
       where: [
+        { driverId, status: 'ASSIGNED' },
         { driverId, status: 'IN_PROGRESS' },
         { driverId, status: 'PLANNED' },
+        { driverId, status: 'CONFIRMED' },
       ],
       order: { routeDate: 'DESC', createdAt: 'DESC' },
     });

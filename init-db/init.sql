@@ -134,6 +134,8 @@ CREATE TABLE `shifts` (
 CREATE TABLE `orders` (
     `id`               VARCHAR(36)    NOT NULL PRIMARY KEY,
     `code`             VARCHAR(50)    NOT NULL UNIQUE,
+    `depot_id`         VARCHAR(36)    NULL     COMMENT 'bưu cục / kho hàng',
+    `driver_id`        VARCHAR(36)    NULL     COMMENT 'tài xế phụ trách',
     `dispatcher_id`    VARCHAR(36)    NULL     COMMENT 'dispatcher quản lý đơn hàng',
     `zone_id`          VARCHAR(36)    NULL     COMMENT 'khu vực giao hàng, nullable – tự động gán theo tọa độ',
     `receiver_name`    VARCHAR(100)   NOT NULL,
@@ -257,10 +259,15 @@ CREATE TABLE `reports` (
 -- ============================================================================
 CREATE INDEX `idx_users_role_status`    ON `users`                  (`role`, `status`);
 CREATE INDEX `idx_orders_status`        ON `orders`                 (`status`);
+CREATE INDEX `idx_orders_driver_id`     ON `orders`                 (`driver_id`);
+CREATE INDEX `idx_orders_depot_id`      ON `orders`                 (`depot_id`);
 CREATE INDEX `idx_orders_zone`          ON `orders`                 (`zone_id`);
 CREATE INDEX `idx_orders_coords`        ON `orders`                 (`latitude`, `longitude`);
 CREATE INDEX `idx_routes_date_driver`   ON `routes`                 (`route_date`, `driver_id`);
+CREATE INDEX `idx_stops_route_id`       ON `stops`                  (`route_id`);
 CREATE INDEX `idx_stops_route_sequence` ON `stops`                  (`route_id`, `sequence_no`);
+CREATE INDEX `idx_tracking_driver_id`   ON `tracking_logs`          (`driver_id`);
+CREATE INDEX `idx_tracking_created_at`  ON `tracking_logs`          (`created_at`);
 CREATE INDEX `idx_tracking_driver_time` ON `tracking_logs`          (`driver_id`, `timestamp` DESC);
 CREATE INDEX `idx_tracking_shift`       ON `tracking_logs`          (`shift_id`);
 CREATE INDEX `idx_status_history_order` ON `order_status_histories` (`order_id`, `timestamp`);
@@ -301,14 +308,14 @@ INSERT INTO `users` (`id`, `full_name`, `email`, `phone`, `password_hash`, `role
 ('u0000000-0000-0000-0000-000000000003', 'Lê Điều Phối 02 (Trung Tâm Q1/Q3)', 'dieupoi02@smartexpress.vn', '0901000003', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DISPATCHER', 'ACTIVE'),
 ('u0000000-0000-0000-0000-000000000004', 'Phạm Điều Phối 03 (Thủ Đức/Tân Bình)', 'dieupoi03@smartexpress.vn', '0901000004', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DISPATCHER', 'ACTIVE'),
 -- Đội ngũ Tài xế (Drivers)
-('u0000000-0000-0000-0000-000000000101', 'Ngô Văn Tài (Xe máy 01)', 'driver01@smartexpress.vn', '0902000101', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000102', 'Phạm Hoàng Nam (Xe máy 02)', 'driver02@smartexpress.vn', '0902000102', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000103', 'Vũ Quốc Bảo (Xe tải Van 500kg)', 'driver03@smartexpress.vn', '0902000103', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000104', 'Đặng Minh Khôi (Xe tải 1 Tấn)', 'driver04@smartexpress.vn', '0902000104', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000105', 'Bùi Anh Tuấn (Xe máy 03)', 'driver05@smartexpress.vn', '0902000105', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000106', 'Đỗ Thành Đạt (Xe máy 04)', 'driver06@smartexpress.vn', '0902000106', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000107', 'Lý Quốc Trọng (Xe tải 1.5 Tấn)', 'driver07@smartexpress.vn', '0902000107', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
-('u0000000-0000-0000-0000-000000000108', 'Trương Gia Huy (Xe máy 05)', 'driver08@smartexpress.vn', '0902000108', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE');
+('u0000000-0000-0000-0000-000000000101', 'Ngô Văn Tài', 'driver01@smartexpress.vn', '0902000101', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000102', 'Phạm Hoàng Nam', 'driver02@smartexpress.vn', '0902000102', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000103', 'Vũ Quốc Bảo', 'driver03@smartexpress.vn', '0902000103', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000104', 'Đặng Minh Khôi', 'driver04@smartexpress.vn', '0902000104', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000105', 'Bùi Anh Tuấn', 'driver05@smartexpress.vn', '0902000105', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000106', 'Đỗ Thành Đạt', 'driver06@smartexpress.vn', '0902000106', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000107', 'Lý Quốc Trọng', 'driver07@smartexpress.vn', '0902000107', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE'),
+('u0000000-0000-0000-0000-000000000108', 'Trương Gia Huy', 'driver08@smartexpress.vn', '0902000108', '$2b$10$ugZpsWzPwMFhdlaosdNc8eaA4GKO5gzn0L/tL7oPhOkirPIx/tgcC', 'DRIVER', 'ACTIVE');
 
 -- 2. HỒ SƠ PHƯƠNG TIỆN TÀI XẾ (DRIVERS)
 INSERT INTO `drivers` (`user_id`, `license_plate`, `vehicle_type`, `max_weight_kg`, `max_volume_m3`, `current_shift_status`) VALUES

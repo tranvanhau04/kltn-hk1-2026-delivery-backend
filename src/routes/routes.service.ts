@@ -354,6 +354,83 @@ export class RoutesService {
   // ─── GET /routes/:id ────────────────────────────────────────────────────────
 
   /**
+   * Get latest active route (ASSIGNED, IN_PROGRESS, PLANNED) for a driver.
+   * Matches mobile app response structure { success, route, stops }.
+   */
+  async getActiveRouteForDriver(driverId: string): Promise<Record<string, unknown>> {
+    const route = await this.routeRepo.findOne({
+      where: [
+        { driverId, status: 'ASSIGNED' },
+        { driverId, status: 'IN_PROGRESS' },
+        { driverId, status: 'PLANNED' },
+        { driverId, status: 'CONFIRMED' },
+      ],
+      order: { routeDate: 'DESC', createdAt: 'DESC' },
+    });
+
+    if (!route) {
+      return {
+        success: false,
+        message: 'No active route found for this driver',
+        route: null,
+        stops: [],
+      };
+    }
+
+    const stops = await this.stopRepo.find({
+      where: { routeId: route.id },
+      relations: ['order'],
+      order: { sequenceNo: 'ASC' },
+    });
+
+    let polyline: [number, number][] = [];
+    if (route.polyline) {
+      try {
+        polyline = JSON.parse(route.polyline) as [number, number][];
+      } catch {
+        polyline = [];
+      }
+    }
+
+    return {
+      success: true,
+      route: {
+        id: route.id,
+        driverId: route.driverId,
+        routeDate: route.routeDate,
+        totalDistanceKm: Number(route.totalDistanceKm),
+        totalEstimatedTimeMin: Number(route.totalEstimatedTimeMin),
+        status: route.status,
+        polyline,
+        createdAt: route.createdAt,
+      },
+      stops: stops.map((s) => ({
+        id: s.id,
+        routeId: s.routeId,
+        orderId: s.orderId,
+        sequenceNo: s.sequenceNo,
+        status: s.status,
+        arrivedAt: s.arrivedAt,
+        order: s.order
+          ? {
+              id: s.order.id,
+              code: s.order.code,
+              receiverName: s.order.receiverName,
+              receiverPhone: s.order.receiverPhone,
+              deliveryAddress: s.order.deliveryAddress,
+              lat: Number(s.order.latitude),
+              lng: Number(s.order.longitude),
+              weightKg: Number(s.order.weightKg),
+              volumeM3: Number(s.order.volumeM3),
+              codAmount: Number(s.order.codAmount),
+              status: s.order.status,
+            }
+          : null,
+      })),
+    };
+  }
+
+  /**
    * Get full route detail: stops in sequence order, driver profile, order details.
    */
   async findById(id: string): Promise<object> {

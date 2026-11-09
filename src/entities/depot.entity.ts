@@ -24,4 +24,10 @@ export class Depot {
 
   @Column({ name: 'longitude', type: 'decimal', precision: 10, scale: 7 })
   longitude: number;
+
+  @Column({ name: 'capacity', type: 'int', default: 1000 })
+  capacity: number;
+
+  @Column({ name: 'contact_phone', type: 'varchar', length: 20, default: '02838000999' })
+  contactPhone: string;
 }

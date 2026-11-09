@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, Column, PrimaryColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { Depot } from './depot.entity';
 
 export enum OrderStatus {
@@ -19,8 +19,13 @@ export class Order {
   @Column({ name: 'code', type: 'varchar', length: 50 })
   code: string;
 
+  @Index()
   @Column({ name: 'depot_id', type: 'varchar', length: 36, nullable: true })
   depotId: string | null;
+
+  @Index()
+  @Column({ name: 'driver_id', type: 'varchar', length: 36, nullable: true })
+  driverId: string | null;
 
   @ManyToOne(() => Depot, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'depot_id' })
@@ -56,6 +61,19 @@ export class Order {
   @Column({ name: 'cod_amount', type: 'decimal', precision: 12, scale: 2, default: 0 })
   codAmount: number;
 
+  @Column({ name: 'sender_name', type: 'varchar', length: 100, nullable: true })
+  senderName: string | null;
+
+  @Column({ name: 'sender_phone', type: 'varchar', length: 20, nullable: true })
+  senderPhone: string | null;
+
+  @Column({ name: 'delivery_fee', type: 'decimal', precision: 12, scale: 2, default: 25000 })
+  deliveryFee: number;
+
+  @Column({ name: 'notes', type: 'text', nullable: true })
+  notes: string | null;
+
+  @Index()
   @Column({ name: 'status', type: 'varchar', length: 20, default: OrderStatus.NEW })
   status: OrderStatus;
 

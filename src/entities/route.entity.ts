@@ -33,6 +33,12 @@ export class Route {
   @Column({ name: 'polyline', type: 'text', nullable: true })
   polyline: string | null;
 
+  @Column({ name: 'start_time', type: 'timestamp', nullable: true })
+  startTime: Date | null;
+
+  @Column({ name: 'end_time', type: 'timestamp', nullable: true })
+  endTime: Date | null;
+
   @Column({ name: 'created_at', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 

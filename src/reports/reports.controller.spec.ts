@@ -14,7 +14,10 @@ describe('ReportsController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ReportsController],
-      providers: [{ provide: ReportsService, useValue: mockReportsService }],
+      providers: [
+        { provide: ReportsService, useValue: mockReportsService },
+        { provide: 'CACHE_MANAGER', useValue: { get: jest.fn(), set: jest.fn(), del: jest.fn() } },
+      ],
     }).compile();
 
     controller = module.get<ReportsController>(ReportsController);

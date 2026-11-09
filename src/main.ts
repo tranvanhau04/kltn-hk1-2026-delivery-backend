@@ -4,10 +4,22 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { json, urlencoded } from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
+import helmet from 'helmet';
+import compression from 'compression';
 import { AppModule } from './app.module';
+import { RedisIoAdapter } from './adapters/redis-io.adapter';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Security: HTTP headers protection
+  app.use(helmet());
+
+  // Performance: Response payload compression
+  app.use(compression());
+
+  // Scalability: Horizontal WebSocket scaling via Redis adapter
+  app.useWebSocketAdapter(new RedisIoAdapter(app));
 
   // Increase payload size limit to 50MB for bulk VRP dispatching
   app.use(json({ limit: '50mb' }));

@@ -1,33 +1,29 @@
 version: '3.8'
 
 services:
-  # Cấu hình cho MySQL Database trong Docker
-  mysql-db:
+  mysql:
     image: mysql:8.0
     container_name: delivery_mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: sapassword
-      MYSQL_DATABASE: delivery_db
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-sapassword}
+      MYSQL_DATABASE: ${DB_NAME:-delivery_db}
     ports:
-      - "3308:3306" # Đã đổi sang cổng 3308 cực kỳ an toàn
+      - "${DB_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./init-db/init.sql:/docker-entrypoint-initdb.d/init.sql
     command: --default-authentication-plugin=mysql_native_password
 
-  # Cấu hình cho phpMyAdmin 
-  phpmyadmin:
-    image: phpmyadmin/phpmyadmin
-    container_name: delivery_phpmyadmin
+  redis:
+    image: redis:alpine
+    container_name: delivery_redis
     restart: always
-    environment:
-      PMA_HOST: mysql-db
-      MYSQL_ROOT_PASSWORD: sapassword
     ports:
-      - "8080:80"
-    depends_on:
-      - mysql-db
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
 
 volumes:
   mysql_data:
+  redis_data:
