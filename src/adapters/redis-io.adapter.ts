@@ -1,5 +1,5 @@
 import { IoAdapter } from '@nestjs/platform-socket.io';
-import { ServerOptions } from 'socket.io';
+import { Server, ServerOptions } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
 import { INestApplicationContext, Logger } from '@nestjs/common';
@@ -40,8 +40,8 @@ export class RedisIoAdapter extends IoAdapter {
     // Connected automatically via ioredis
   }
 
-  createIOServer(port: number, options?: ServerOptions): any {
-    const server = super.createIOServer(port, options);
+  createIOServer(port: number, options?: ServerOptions): unknown {
+    const server = super.createIOServer(port, options) as unknown as Server;
     server.adapter(this.adapterConstructor);
     return server;
   }

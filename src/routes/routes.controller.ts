@@ -90,7 +90,7 @@ export class RoutesController {
    * Get active route for the currently authenticated driver.
    */
   @Get('active')
-  async getActiveRoute(@CurrentUser() user: JwtPayload) {
+  async getActiveRoute(@CurrentUser() user: JwtPayload): Promise<Record<string, unknown>> {
     return this.routesService.getActiveRouteForDriver(user?.sub);
   }
 
@@ -99,7 +99,7 @@ export class RoutesController {
    * Alias of /routes/active.
    */
   @Get('today')
-  async getTodayRoute(@CurrentUser() user: JwtPayload) {
+  async getTodayRoute(@CurrentUser() user: JwtPayload): Promise<Record<string, unknown>> {
     return this.routesService.getActiveRouteForDriver(user?.sub);
   }
 
@@ -108,7 +108,7 @@ export class RoutesController {
    * Get active route for a specific driver by driverId.
    */
   @Get('driver/:driverId')
-  async getDriverRoute(@Param('driverId') driverId: string) {
+  async getDriverRoute(@Param('driverId') driverId: string): Promise<Record<string, unknown>> {
     return this.routesService.getActiveRouteForDriver(driverId);
   }
 

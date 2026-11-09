@@ -357,7 +357,7 @@ export class RoutesService {
    * Get latest active route (ASSIGNED, IN_PROGRESS, PLANNED) for a driver.
    * Matches mobile app response structure { success, route, stops }.
    */
-  async getActiveRouteForDriver(driverId: string): Promise<any> {
+  async getActiveRouteForDriver(driverId: string): Promise<Record<string, unknown>> {
     const route = await this.routeRepo.findOne({
       where: [
         { driverId, status: 'ASSIGNED' },
