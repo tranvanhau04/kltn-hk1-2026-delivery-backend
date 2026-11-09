@@ -6,6 +6,7 @@ import { Driver } from '../entities/driver.entity';
 import { Route } from '../entities/route.entity';
 import { Stop } from '../entities/stop.entity';
 import { User } from '../entities/user.entity';
+import { SimulationService } from './simulation.service';
 import { v4 as uuidv4 } from 'uuid';
 
 interface LocationDto {
@@ -24,7 +25,34 @@ export class TrackingController {
     @InjectRepository(Route) private readonly routeRepo: Repository<Route>,
     @InjectRepository(Stop) private readonly stopRepo: Repository<Stop>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
+    private readonly simulationService: SimulationService,
   ) {}
+
+  /**
+   * POST /api/tracking/simulate/start
+   * Starts background GPS simulation for driver Văn Hậu Trần
+   */
+  @Post('tracking/simulate/start')
+  startSimulation() {
+    return this.simulationService.startSimulation();
+  }
+
+  /**
+   * POST /api/tracking/simulate/stop
+   * Stops background GPS simulation
+   */
+  @Post('tracking/simulate/stop')
+  stopSimulation() {
+    return this.simulationService.stopSimulation();
+  }
+
+  /**
+   * GET /api/tracking/simulate/status
+   */
+  @Get('tracking/simulate/status')
+  getSimulationStatus() {
+    return { isRunning: this.simulationService.isRunning() };
+  }
 
   /**
    * GET /api/tracking/live
@@ -131,10 +159,12 @@ export class TrackingController {
   }
 
   /**
-   * GET /api/driver/:driverId/route
-   * Returns the active route + ordered stops with full order details for the driver's mobile app.
+   * GET /api/tracking/driver/:driverId/route-today
+   * Alias: GET /api/driver/:driverId/route
+   * Returns the active route + ordered stops with full order details for the driver's mobile app & web admin.
    * Returns a clean 404-style response when no route is assigned for today — never returns mock data.
    */
+  @Get('tracking/driver/:driverId/route-today')
   @Get('driver/:driverId/route')
   async getDriverRoute(@Param('driverId') driverId: string) {
     const driver = await this.driverRepo.findOne({ where: { userId: driverId } });
@@ -169,6 +199,7 @@ export class TrackingController {
     // Load stops with order data
     const stops = await this.stopRepo.find({
       where: { routeId: route.id },
+      relations: ['order'],
       order: { sequenceNo: 'ASC' },
     });
 
@@ -206,13 +237,32 @@ export class TrackingController {
               receiverName: s.order.receiverName,
               receiverPhone: s.order.receiverPhone,
               deliveryAddress: s.order.deliveryAddress,
+              latitude: Number(s.order.latitude),
+              longitude: Number(s.order.longitude),
               lat: Number(s.order.latitude),
               lng: Number(s.order.longitude),
               codAmount: Number(s.order.codAmount),
               status: s.order.status,
+              createdAt: s.order.createdAt,
             }
           : null,
       })),
+      orders: stops
+        .filter((s) => s.order)
+        .map((s) => ({
+          id: s.order.id,
+          code: s.order.code,
+          receiverName: s.order.receiverName,
+          receiverPhone: s.order.receiverPhone,
+          deliveryAddress: s.order.deliveryAddress,
+          latitude: Number(s.order.latitude),
+          longitude: Number(s.order.longitude),
+          codAmount: Number(s.order.codAmount),
+          status: s.order.status,
+          stopStatus: s.status,
+          sequenceNo: s.sequenceNo,
+          createdAt: s.order.createdAt,
+        })),
     };
   }
 

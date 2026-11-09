@@ -12,6 +12,14 @@ export class QueryOrderDto {
 
   @IsOptional()
   @IsString()
+  hubId?: string;
+
+  @IsOptional()
+  @IsString()
+  regionId?: string;
+
+  @IsOptional()
+  @IsString()
   search?: string;
 
   @IsOptional()

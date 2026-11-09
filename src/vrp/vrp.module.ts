@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { VrpController } from './vrp.controller';
 import { VrpService } from './vrp.service';
@@ -9,9 +9,11 @@ import { Order } from '../entities/order.entity';
 import { Driver } from '../entities/driver.entity';
 import { Depot } from '../entities/depot.entity';
 import { User } from '../entities/user.entity';
+import { Zone } from '../entities/zone.entity';
+import { ZoneDriver } from '../entities/zone-driver.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Order, Driver, Depot, User]), RoutesModule],
+  imports: [TypeOrmModule.forFeature([Order, Driver, Depot, User, Zone, ZoneDriver]), RoutesModule],
   controllers: [VrpController],
   providers: [VrpService, GraphService, MaxFlowService],
 })

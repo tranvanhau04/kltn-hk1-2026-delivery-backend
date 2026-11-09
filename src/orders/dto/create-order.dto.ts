@@ -40,4 +40,8 @@ export class CreateOrderDto {
   @IsUUID()
   @IsOptional()
   zoneId?: string;
+
+  @IsOptional()
+  @IsString()
+  depotId?: string;
 }

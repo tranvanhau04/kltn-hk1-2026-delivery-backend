@@ -25,6 +25,14 @@ export class QueryDriverDto {
   vehicleType?: string;
 
   @IsOptional()
+  @IsString({ message: 'Hub ID must be a string' })
+  hubId?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Region ID must be a string' })
+  regionId?: string;
+
+  @IsOptional()
   @IsEnum(DriverShiftStatus, {
     message: `Shift status must be one of: ${Object.values(DriverShiftStatus).join(', ')}`,
   })

@@ -9,6 +9,7 @@ import {
   Query,
   Param,
   ParseUUIDPipe,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
@@ -20,6 +21,7 @@ import { Order, OrderStatus } from '../entities/order.entity';
 import { Driver } from '../entities/driver.entity';
 import { Depot } from '../entities/depot.entity';
 import { User, UserRole } from '../entities/user.entity';
+import { ZoneDriver } from '../entities/zone-driver.entity';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -28,6 +30,7 @@ interface OptimizeDto {
   depotId?: string;
   orderIds?: string[];
   driverIds?: string[];
+  zoneId?: string;
 }
 
 /**
@@ -49,6 +52,7 @@ export class VrpController {
     @InjectRepository(Driver) private readonly driverRepo: Repository<Driver>,
     @InjectRepository(Depot) private readonly depotRepo: Repository<Depot>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
+    @InjectRepository(ZoneDriver) private readonly zoneDriverRepo: Repository<ZoneDriver>,
   ) {}
 
   /**
@@ -65,41 +69,97 @@ export class VrpController {
     @Body() dto: OptimizeDto,
     @CurrentUser() user: JwtPayload,
   ): Promise<VrpSolutionResult> {
-    const depot = dto.depotId
-      ? await this.depotRepo.findOneOrFail({ where: { id: dto.depotId } })
-      : await this.depotRepo.findOne({ where: {} });
+    if (!dto.depotId) {
+      throw new BadRequestException('depotId (Hub) is required for VRP optimization');
+    }
 
-    if (!depot) throw new Error('No depot configured');
+    const depot = await this.depotRepo.findOne({ where: { id: dto.depotId } });
 
-    const orders = await this.orderRepo.find({
-      where: dto.orderIds?.length ? { id: In(dto.orderIds) } : { status: OrderStatus.NEW },
-    });
+    if (!depot) {
+      throw new BadRequestException(`Không tìm thấy Hub với ID: ${dto.depotId}`);
+    }
+
+    // Geographical Clustering: Filter / group unassigned orders by zone/district
+    const orderWhere: Record<string, any> = {
+      status: OrderStatus.NEW,
+    };
+    if (depot?.id && !dto.orderIds?.length) {
+      orderWhere.depotId = depot.id;
+    }
+    if (dto.orderIds?.length) {
+      orderWhere.id = In(dto.orderIds);
+    }
+    if (dto.zoneId) {
+      orderWhere.zoneId = dto.zoneId;
+    }
+
+    const orders = await this.orderRepo.find({ where: orderWhere });
+
+    // Determine target zone for geographical clustering and driver availability
+    const targetZoneId = dto.zoneId;
+
+    // Driver Availability: Only include drivers who have an active shift (status = ONLINE or equivalent) in the selected zone
+    const ACTIVE_SHIFT_STATUSES = ['ONLINE', 'ONLINE_READY', 'ON_DUTY'];
+
+    let zoneDriverIds: Set<string> | null = null;
+    if (targetZoneId) {
+      const zoneDrivers = await this.zoneDriverRepo.find({ where: { zoneId: targetZoneId } });
+      if (zoneDrivers.length > 0) {
+        zoneDriverIds = new Set(zoneDrivers.map((zd) => zd.driverId));
+      }
+    }
 
     const driversRaw = await this.driverRepo.find(
-      dto.driverIds?.length ? { where: { userId: In(dto.driverIds) } } : {},
+      dto.driverIds?.length
+        ? { where: { userId: In(dto.driverIds) } }
+        : depot?.id
+          ? { where: { depotId: depot.id } }
+          : {},
     );
 
-    const userIds = driversRaw.map((d) => d.userId);
+    // Filter drivers by active shift status and zone assignment
+    const eligibleDrivers = driversRaw.filter((d) => {
+      const isActive =
+        ACTIVE_SHIFT_STATUSES.includes(d.currentShiftStatus) ||
+        (d.currentShiftStatus !== 'OFFLINE' && d.currentShiftStatus !== 'BUSY');
+      if (!isActive) return false;
+
+      if (zoneDriverIds && !zoneDriverIds.has(d.userId)) {
+        return false;
+      }
+      return true;
+    });
+
+    const userIds = eligibleDrivers.map((d) => d.userId);
     const users = userIds.length ? await this.userRepo.find({ where: { id: In(userIds) } }) : [];
     const userMap = new Map(users.map((u) => [u.id, u]));
 
-    const drivers = driversRaw
-      .filter((d) => d.currentShiftStatus !== 'OFFLINE')
-      .map((d) => {
-        const u = userMap.get(d.userId);
-        return {
-          userId: d.userId,
-          fullName: u?.fullName ?? 'Unknown Driver',
-          phone: u?.phone ?? '',
-          licensePlate: d.licensePlate,
-          vehicleType: d.vehicleType,
-          maxWeightKg: Number(d.maxWeightKg),
-          maxVolumeM3: Number(d.maxVolumeM3),
-        };
-      });
+    // Map drivers strictly to their designated working zones from zone_drivers
+    const allZoneDrivers = await this.zoneDriverRepo.find();
+    const driverZoneMap = new Map<string, string[]>();
+    for (const zd of allZoneDrivers) {
+      const list = driverZoneMap.get(zd.driverId) || [];
+      list.push(zd.zoneId);
+      driverZoneMap.set(zd.driverId, list);
+    }
+
+    // Vehicle Capacity Constraints: Map each available driver to vehicle's maximum payload (Weight/Volume)
+    const drivers = eligibleDrivers.map((d) => {
+      const u = userMap.get(d.userId);
+      return {
+        userId: d.userId,
+        fullName: u?.fullName ?? 'Unknown Driver',
+        phone: u?.phone ?? '',
+        licensePlate: d.licensePlate,
+        vehicleType: d.vehicleType,
+        maxWeightKg: Number(d.maxWeightKg),
+        maxVolumeM3: Number(d.maxVolumeM3),
+        zoneIds: driverZoneMap.get(d.userId) || [],
+      };
+    });
 
     this.logger.log(
-      `Optimize request: dispatcher=${user?.sub}, orders=${orders.length}, drivers=${drivers.length}`,
+      `Optimize request: dispatcher=${user?.sub}, zone=${targetZoneId || 'ALL'}, orders=${orders.length}, drivers=${drivers.length}`,
     );
 
     return this.vrpService.solve(
@@ -120,11 +180,13 @@ export class VrpController {
         weightKg: Number(o.weightKg),
         volumeM3: Number(o.volumeM3),
         codAmount: Number(o.codAmount),
+        zoneId: o.zoneId,
         timeWindowStart:
           (o as unknown as { timeWindowStart?: number }).timeWindowStart ?? undefined,
         timeWindowEnd: (o as unknown as { timeWindowEnd?: number }).timeWindowEnd ?? undefined,
       })),
       drivers,
+      targetZoneId,
     );
   }
 

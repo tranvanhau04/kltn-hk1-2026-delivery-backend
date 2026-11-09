@@ -8,9 +8,13 @@ import { OrderStatusHistory } from '../entities/order-status-history.entity';
 import { Stop } from '../entities/stop.entity';
 import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
 import { GeocodingService } from '../geocoding/geocoding.service';
+import { TrackingModule } from '../tracking/tracking.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Order, Depot, OrderStatusHistory, Stop, ProofOfDelivery])],
+  imports: [
+    TypeOrmModule.forFeature([Order, Depot, OrderStatusHistory, Stop, ProofOfDelivery]),
+    TrackingModule,
+  ],
   controllers: [OrdersController],
   providers: [OrdersService, GeocodingService],
   exports: [OrdersService, GeocodingService],

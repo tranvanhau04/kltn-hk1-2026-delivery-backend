@@ -50,4 +50,8 @@ export class CreateDriverDto {
     message: `Shift status must be one of: ${Object.values(DriverShiftStatus).join(', ')}`,
   })
   currentShiftStatus?: DriverShiftStatus = DriverShiftStatus.OFFLINE;
+
+  @IsOptional()
+  @IsString()
+  depotId?: string;
 }
