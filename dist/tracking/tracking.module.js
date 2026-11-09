@@ -12,6 +12,7 @@ const typeorm_1 = require("@nestjs/typeorm");
 const tracking_controller_1 = require("./tracking.controller");
 const tracking_gateway_1 = require("./tracking.gateway");
 const ws_throttler_guard_1 = require("./guards/ws-throttler.guard");
+const simulation_service_1 = require("./simulation.service");
 const tracking_log_entity_1 = require("../entities/tracking-log.entity");
 const shift_entity_1 = require("../entities/shift.entity");
 const driver_entity_1 = require("../entities/driver.entity");
@@ -29,8 +30,8 @@ exports.TrackingModule = TrackingModule = __decorate([
             auth_module_1.AuthModule,
         ],
         controllers: [tracking_controller_1.TrackingController],
-        providers: [tracking_gateway_1.TrackingGateway, ws_throttler_guard_1.WsThrottlerGuard],
-        exports: [tracking_gateway_1.TrackingGateway, ws_throttler_guard_1.WsThrottlerGuard],
+        providers: [tracking_gateway_1.TrackingGateway, ws_throttler_guard_1.WsThrottlerGuard, simulation_service_1.SimulationService],
+        exports: [tracking_gateway_1.TrackingGateway, ws_throttler_guard_1.WsThrottlerGuard, simulation_service_1.SimulationService],
     })
 ], TrackingModule);
 //# sourceMappingURL=tracking.module.js.map

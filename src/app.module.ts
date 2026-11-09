@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DatabaseModule } from './database/database.module';
+import { RegionsModule } from './regions/regions.module';
 import { DepotsModule } from './depots/depots.module';
 import { OrdersModule } from './orders/orders.module';
 import { VrpModule } from './vrp/vrp.module';
@@ -40,6 +41,7 @@ import { ReportsModule } from './reports/reports.module';
     AuthModule,
     UsersModule,
     DatabaseModule,
+    RegionsModule,
     DepotsModule,
     OrdersModule,
     VrpModule,

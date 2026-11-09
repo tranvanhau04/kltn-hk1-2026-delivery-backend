@@ -35,4 +35,8 @@ export class UpdateDriverDto {
   )
   @Min(0.001, { message: 'Max volume capacity must be greater than 0' })
   maxVolumeM3?: number;
+
+  @IsOptional()
+  @IsString()
+  depotId?: string;
 }

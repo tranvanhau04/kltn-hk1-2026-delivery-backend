@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.Driver = exports.DriverShiftStatus = void 0;
 const typeorm_1 = require("typeorm");
 const shift_entity_1 = require("./shift.entity");
+const depot_entity_1 = require("./depot.entity");
 var DriverShiftStatus;
 (function (DriverShiftStatus) {
     DriverShiftStatus["OFFLINE"] = "OFFLINE";
@@ -21,6 +22,8 @@ var DriverShiftStatus;
 })(DriverShiftStatus || (exports.DriverShiftStatus = DriverShiftStatus = {}));
 let Driver = class Driver {
     userId;
+    depotId;
+    depot;
     licensePlate;
     vehicleType;
     maxWeightKg;
@@ -33,6 +36,15 @@ __decorate([
     (0, typeorm_1.PrimaryColumn)({ name: 'user_id', type: 'varchar', length: 36 }),
     __metadata("design:type", String)
 ], Driver.prototype, "userId", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ name: 'depot_id', type: 'varchar', length: 36, nullable: true }),
+    __metadata("design:type", Object)
+], Driver.prototype, "depotId", void 0);
+__decorate([
+    (0, typeorm_1.ManyToOne)(() => depot_entity_1.Depot, { nullable: true, onDelete: 'SET NULL' }),
+    (0, typeorm_1.JoinColumn)({ name: 'depot_id' }),
+    __metadata("design:type", Object)
+], Driver.prototype, "depot", void 0);
 __decorate([
     (0, typeorm_1.Column)({ name: 'license_plate', type: 'varchar', length: 20 }),
     __metadata("design:type", String)

@@ -9,6 +9,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.DatabaseModule = void 0;
 const common_1 = require("@nestjs/common");
 const typeorm_1 = require("@nestjs/typeorm");
+const region_entity_1 = require("../entities/region.entity");
 const depot_entity_1 = require("../entities/depot.entity");
 const order_entity_1 = require("../entities/order.entity");
 const driver_entity_1 = require("../entities/driver.entity");
@@ -36,6 +37,7 @@ exports.DatabaseModule = DatabaseModule = __decorate([
                 password: 'sapassword',
                 database: 'delivery_db',
                 entities: [
+                    region_entity_1.Region,
                     depot_entity_1.Depot,
                     order_entity_1.Order,
                     driver_entity_1.Driver,

@@ -12,6 +12,16 @@ export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   /**
+   * GET /reports/dashboard
+   * Realtime dashboard summary metrics & charts
+   */
+  @Get('dashboard')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  async getDashboard() {
+    return this.reportsService.getDashboardStats();
+  }
+
+  /**
    * GET /reports/kpis (or /reports)
    * Performance & KPI Analytics
    */

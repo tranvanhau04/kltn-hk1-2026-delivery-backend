@@ -21,6 +21,7 @@ const driver_entity_1 = require("../entities/driver.entity");
 const route_entity_1 = require("../entities/route.entity");
 const stop_entity_1 = require("../entities/stop.entity");
 const user_entity_1 = require("../entities/user.entity");
+const simulation_service_1 = require("./simulation.service");
 const uuid_1 = require("uuid");
 let TrackingController = class TrackingController {
     logRepo;
@@ -28,12 +29,23 @@ let TrackingController = class TrackingController {
     routeRepo;
     stopRepo;
     userRepo;
-    constructor(logRepo, driverRepo, routeRepo, stopRepo, userRepo) {
+    simulationService;
+    constructor(logRepo, driverRepo, routeRepo, stopRepo, userRepo, simulationService) {
         this.logRepo = logRepo;
         this.driverRepo = driverRepo;
         this.routeRepo = routeRepo;
         this.stopRepo = stopRepo;
         this.userRepo = userRepo;
+        this.simulationService = simulationService;
+    }
+    startSimulation() {
+        return this.simulationService.startSimulation();
+    }
+    stopSimulation() {
+        return this.simulationService.stopSimulation();
+    }
+    getSimulationStatus() {
+        return { isRunning: this.simulationService.isRunning() };
     }
     async liveTracking() {
         const drivers = await this.driverRepo.find();
@@ -133,6 +145,7 @@ let TrackingController = class TrackingController {
         }
         const stops = await this.stopRepo.find({
             where: { routeId: route.id },
+            relations: ['order'],
             order: { sequenceNo: 'ASC' },
         });
         let polyline = [];
@@ -169,12 +182,31 @@ let TrackingController = class TrackingController {
                         receiverName: s.order.receiverName,
                         receiverPhone: s.order.receiverPhone,
                         deliveryAddress: s.order.deliveryAddress,
+                        latitude: Number(s.order.latitude),
+                        longitude: Number(s.order.longitude),
                         lat: Number(s.order.latitude),
                         lng: Number(s.order.longitude),
                         codAmount: Number(s.order.codAmount),
                         status: s.order.status,
+                        createdAt: s.order.createdAt,
                     }
                     : null,
+            })),
+            orders: stops
+                .filter((s) => s.order)
+                .map((s) => ({
+                id: s.order.id,
+                code: s.order.code,
+                receiverName: s.order.receiverName,
+                receiverPhone: s.order.receiverPhone,
+                deliveryAddress: s.order.deliveryAddress,
+                latitude: Number(s.order.latitude),
+                longitude: Number(s.order.longitude),
+                codAmount: Number(s.order.codAmount),
+                status: s.order.status,
+                stopStatus: s.status,
+                sequenceNo: s.sequenceNo,
+                createdAt: s.order.createdAt,
             })),
         };
     }
@@ -199,6 +231,24 @@ let TrackingController = class TrackingController {
 };
 exports.TrackingController = TrackingController;
 __decorate([
+    (0, common_1.Post)('tracking/simulate/start'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], TrackingController.prototype, "startSimulation", null);
+__decorate([
+    (0, common_1.Post)('tracking/simulate/stop'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], TrackingController.prototype, "stopSimulation", null);
+__decorate([
+    (0, common_1.Get)('tracking/simulate/status'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], TrackingController.prototype, "getSimulationStatus", null);
+__decorate([
     (0, common_1.Get)('tracking/live'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
@@ -212,6 +262,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], TrackingController.prototype, "postLocation", null);
 __decorate([
+    (0, common_1.Get)('tracking/driver/:driverId/route-today'),
     (0, common_1.Get)('driver/:driverId/route'),
     __param(0, (0, common_1.Param)('driverId')),
     __metadata("design:type", Function),
@@ -243,6 +294,7 @@ exports.TrackingController = TrackingController = __decorate([
         typeorm_2.Repository,
         typeorm_2.Repository,
         typeorm_2.Repository,
-        typeorm_2.Repository])
+        typeorm_2.Repository,
+        simulation_service_1.SimulationService])
 ], TrackingController);
 //# sourceMappingURL=tracking.controller.js.map

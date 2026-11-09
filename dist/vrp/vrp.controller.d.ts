@@ -7,11 +7,13 @@ import { Order } from '../entities/order.entity';
 import { Driver } from '../entities/driver.entity';
 import { Depot } from '../entities/depot.entity';
 import { User } from '../entities/user.entity';
+import { ZoneDriver } from '../entities/zone-driver.entity';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 interface OptimizeDto {
     depotId?: string;
     orderIds?: string[];
     driverIds?: string[];
+    zoneId?: string;
 }
 export declare class VrpController {
     private readonly vrpService;
@@ -20,8 +22,9 @@ export declare class VrpController {
     private readonly driverRepo;
     private readonly depotRepo;
     private readonly userRepo;
+    private readonly zoneDriverRepo;
     private readonly logger;
-    constructor(vrpService: VrpService, routesService: RoutesService, orderRepo: Repository<Order>, driverRepo: Repository<Driver>, depotRepo: Repository<Depot>, userRepo: Repository<User>);
+    constructor(vrpService: VrpService, routesService: RoutesService, orderRepo: Repository<Order>, driverRepo: Repository<Driver>, depotRepo: Repository<Depot>, userRepo: Repository<User>, zoneDriverRepo: Repository<ZoneDriver>);
     optimize(dto: OptimizeDto, user: JwtPayload): Promise<VrpSolutionResult>;
     confirm(dto: ConfirmRoutesDto, user: JwtPayload): Promise<import("../routes/routes.service").ConfirmRoutesResult>;
     listRoutes(query: QueryRoutesDto): Promise<{

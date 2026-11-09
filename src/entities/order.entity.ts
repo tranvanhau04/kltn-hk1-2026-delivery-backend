@@ -1,4 +1,5 @@
-import { Entity, Column, PrimaryColumn } from 'typeorm';
+import { Entity, Column, PrimaryColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Depot } from './depot.entity';
 
 export enum OrderStatus {
   NEW = 'NEW',
@@ -17,6 +18,13 @@ export class Order {
 
   @Column({ name: 'code', type: 'varchar', length: 50 })
   code: string;
+
+  @Column({ name: 'depot_id', type: 'varchar', length: 36, nullable: true })
+  depotId: string | null;
+
+  @ManyToOne(() => Depot, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'depot_id' })
+  depot: Depot | null;
 
   @Column({ name: 'dispatcher_id', type: 'varchar', length: 36, nullable: true })
   dispatcherId: string | null;

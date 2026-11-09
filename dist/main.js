@@ -35,11 +35,14 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const core_1 = require("@nestjs/core");
 const common_1 = require("@nestjs/common");
+const express_1 = require("express");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const app_module_1 = require("./app.module");
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule);
+    app.use((0, express_1.json)({ limit: '50mb' }));
+    app.use((0, express_1.urlencoded)({ extended: true, limit: '50mb' }));
     const uploadDir = path.join(process.cwd(), 'uploads', 'pod');
     if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true });

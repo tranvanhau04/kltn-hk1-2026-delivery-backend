@@ -1,4 +1,4 @@
-﻿import { Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { RoutesController } from './routes.controller';
 import { RoutesService } from './routes.service';
@@ -9,10 +9,12 @@ import { Driver } from '../entities/driver.entity';
 import { Depot } from '../entities/depot.entity';
 import { User } from '../entities/user.entity';
 import { OrderStatusHistory } from '../entities/order-status-history.entity';
+import { TrackingModule } from '../tracking/tracking.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Route, Stop, Order, Driver, Depot, User, OrderStatusHistory]),
+    TrackingModule,
   ],
   controllers: [RoutesController],
   providers: [RoutesService],

@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryColumn } from 'typeorm';
+import { Entity, Column, PrimaryColumn, Index } from 'typeorm';
 
 export enum UserRole {
   ADMIN = 'ADMIN',
@@ -23,10 +23,12 @@ export class User {
   @Column({ name: 'full_name', type: 'varchar', length: 100 })
   fullName: string;
 
-  @Column({ name: 'email', type: 'varchar', length: 150 })
+  @Index({ unique: true })
+  @Column({ name: 'email', type: 'varchar', length: 150, unique: true })
   email: string;
 
-  @Column({ name: 'phone', type: 'varchar', length: 20 })
+  @Index({ unique: true })
+  @Column({ name: 'phone', type: 'varchar', length: 20, unique: true })
   phone: string;
 
   @Column({ name: 'password_hash', type: 'varchar', length: 255, select: false })

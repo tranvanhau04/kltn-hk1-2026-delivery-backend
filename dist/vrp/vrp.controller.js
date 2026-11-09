@@ -23,6 +23,7 @@ const order_entity_1 = require("../entities/order.entity");
 const driver_entity_1 = require("../entities/driver.entity");
 const depot_entity_1 = require("../entities/depot.entity");
 const user_entity_1 = require("../entities/user.entity");
+const zone_driver_entity_1 = require("../entities/zone-driver.entity");
 const roles_decorator_1 = require("../auth/decorators/roles.decorator");
 const current_user_decorator_1 = require("../auth/decorators/current-user.decorator");
 let VrpController = VrpController_1 = class VrpController {
@@ -32,31 +33,73 @@ let VrpController = VrpController_1 = class VrpController {
     driverRepo;
     depotRepo;
     userRepo;
+    zoneDriverRepo;
     logger = new common_1.Logger(VrpController_1.name);
-    constructor(vrpService, routesService, orderRepo, driverRepo, depotRepo, userRepo) {
+    constructor(vrpService, routesService, orderRepo, driverRepo, depotRepo, userRepo, zoneDriverRepo) {
         this.vrpService = vrpService;
         this.routesService = routesService;
         this.orderRepo = orderRepo;
         this.driverRepo = driverRepo;
         this.depotRepo = depotRepo;
         this.userRepo = userRepo;
+        this.zoneDriverRepo = zoneDriverRepo;
     }
     async optimize(dto, user) {
-        const depot = dto.depotId
-            ? await this.depotRepo.findOneOrFail({ where: { id: dto.depotId } })
-            : await this.depotRepo.findOne({ where: {} });
-        if (!depot)
-            throw new Error('No depot configured');
-        const orders = await this.orderRepo.find({
-            where: dto.orderIds?.length ? { id: (0, typeorm_2.In)(dto.orderIds) } : { status: order_entity_1.OrderStatus.NEW },
+        if (!dto.depotId) {
+            throw new common_1.BadRequestException('depotId (Hub) is required for VRP optimization');
+        }
+        const depot = await this.depotRepo.findOne({ where: { id: dto.depotId } });
+        if (!depot) {
+            throw new common_1.BadRequestException(`Không tìm thấy Hub với ID: ${dto.depotId}`);
+        }
+        const orderWhere = {
+            status: order_entity_1.OrderStatus.NEW,
+        };
+        if (depot?.id && !dto.orderIds?.length) {
+            orderWhere.depotId = depot.id;
+        }
+        if (dto.orderIds?.length) {
+            orderWhere.id = (0, typeorm_2.In)(dto.orderIds);
+        }
+        if (dto.zoneId) {
+            orderWhere.zoneId = dto.zoneId;
+        }
+        const orders = await this.orderRepo.find({ where: orderWhere });
+        const targetZoneId = dto.zoneId;
+        const ACTIVE_SHIFT_STATUSES = ['ONLINE', 'ONLINE_READY', 'ON_DUTY'];
+        let zoneDriverIds = null;
+        if (targetZoneId) {
+            const zoneDrivers = await this.zoneDriverRepo.find({ where: { zoneId: targetZoneId } });
+            if (zoneDrivers.length > 0) {
+                zoneDriverIds = new Set(zoneDrivers.map((zd) => zd.driverId));
+            }
+        }
+        const driversRaw = await this.driverRepo.find(dto.driverIds?.length
+            ? { where: { userId: (0, typeorm_2.In)(dto.driverIds) } }
+            : depot?.id
+                ? { where: { depotId: depot.id } }
+                : {});
+        const eligibleDrivers = driversRaw.filter((d) => {
+            const isActive = ACTIVE_SHIFT_STATUSES.includes(d.currentShiftStatus) ||
+                (d.currentShiftStatus !== 'OFFLINE' && d.currentShiftStatus !== 'BUSY');
+            if (!isActive)
+                return false;
+            if (zoneDriverIds && !zoneDriverIds.has(d.userId)) {
+                return false;
+            }
+            return true;
         });
-        const driversRaw = await this.driverRepo.find(dto.driverIds?.length ? { where: { userId: (0, typeorm_2.In)(dto.driverIds) } } : {});
-        const userIds = driversRaw.map((d) => d.userId);
+        const userIds = eligibleDrivers.map((d) => d.userId);
         const users = userIds.length ? await this.userRepo.find({ where: { id: (0, typeorm_2.In)(userIds) } }) : [];
         const userMap = new Map(users.map((u) => [u.id, u]));
-        const drivers = driversRaw
-            .filter((d) => d.currentShiftStatus !== 'OFFLINE')
-            .map((d) => {
+        const allZoneDrivers = await this.zoneDriverRepo.find();
+        const driverZoneMap = new Map();
+        for (const zd of allZoneDrivers) {
+            const list = driverZoneMap.get(zd.driverId) || [];
+            list.push(zd.zoneId);
+            driverZoneMap.set(zd.driverId, list);
+        }
+        const drivers = eligibleDrivers.map((d) => {
             const u = userMap.get(d.userId);
             return {
                 userId: d.userId,
@@ -66,9 +109,10 @@ let VrpController = VrpController_1 = class VrpController {
                 vehicleType: d.vehicleType,
                 maxWeightKg: Number(d.maxWeightKg),
                 maxVolumeM3: Number(d.maxVolumeM3),
+                zoneIds: driverZoneMap.get(d.userId) || [],
             };
         });
-        this.logger.log(`Optimize request: dispatcher=${user?.sub}, orders=${orders.length}, drivers=${drivers.length}`);
+        this.logger.log(`Optimize request: dispatcher=${user?.sub}, zone=${targetZoneId || 'ALL'}, orders=${orders.length}, drivers=${drivers.length}`);
         return this.vrpService.solve({
             id: depot.id,
             name: depot.name,
@@ -85,9 +129,10 @@ let VrpController = VrpController_1 = class VrpController {
             weightKg: Number(o.weightKg),
             volumeM3: Number(o.volumeM3),
             codAmount: Number(o.codAmount),
+            zoneId: o.zoneId,
             timeWindowStart: o.timeWindowStart ?? undefined,
             timeWindowEnd: o.timeWindowEnd ?? undefined,
-        })), drivers);
+        })), drivers, targetZoneId);
     }
     async confirm(dto, user) {
         this.logger.log(`Confirm request: dispatcher=${user?.sub}, routes=${dto.routes?.length ?? 0}`);
@@ -141,8 +186,10 @@ exports.VrpController = VrpController = VrpController_1 = __decorate([
     __param(3, (0, typeorm_1.InjectRepository)(driver_entity_1.Driver)),
     __param(4, (0, typeorm_1.InjectRepository)(depot_entity_1.Depot)),
     __param(5, (0, typeorm_1.InjectRepository)(user_entity_1.User)),
+    __param(6, (0, typeorm_1.InjectRepository)(zone_driver_entity_1.ZoneDriver)),
     __metadata("design:paramtypes", [vrp_service_1.VrpService,
         routes_service_1.RoutesService,
+        typeorm_2.Repository,
         typeorm_2.Repository,
         typeorm_2.Repository,
         typeorm_2.Repository,

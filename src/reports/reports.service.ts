@@ -39,6 +39,74 @@ export class ReportsService {
     return { start, end };
   }
 
+  async getDashboardStats() {
+    const totalOrders = await this.orderRepo.count();
+
+    const activeDrivers = await this.driverRepo
+      .createQueryBuilder('driver')
+      .where('driver.current_shift_status != :status', { status: DriverShiftStatus.OFFLINE })
+      .getCount();
+
+    const codResult = await this.orderRepo
+      .createQueryBuilder('order')
+      .select('SUM(order.codAmount)', 'total')
+      .getRawOne();
+    const totalCOD = Number(codResult?.total || 0);
+
+    const deliveredCount = await this.orderRepo.count({
+      where: { status: OrderStatus.DELIVERED },
+    });
+    const failedCount = await this.orderRepo.count({
+      where: { status: OrderStatus.FAILED },
+    });
+
+    const successRate =
+      totalOrders > 0
+        ? Number(((deliveredCount / totalOrders) * 100).toFixed(1))
+        : 0;
+
+    // Group by day of week based on existing orders
+    const daysOfWeek = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    const dayCounts: Record<string, { orders: number; delivered: number; failed: number }> = {
+      T2: { orders: 0, delivered: 0, failed: 0 },
+      T3: { orders: 0, delivered: 0, failed: 0 },
+      T4: { orders: 0, delivered: 0, failed: 0 },
+      T5: { orders: 0, delivered: 0, failed: 0 },
+      T6: { orders: 0, delivered: 0, failed: 0 },
+      T7: { orders: 0, delivered: 0, failed: 0 },
+      CN: { orders: 0, delivered: 0, failed: 0 },
+    };
+
+    const allOrders = await this.orderRepo.find({
+      select: ['id', 'status', 'createdAt'],
+    });
+
+    allOrders.forEach((o) => {
+      const d = o.createdAt ? new Date(o.createdAt) : new Date();
+      const dayLabel = daysOfWeek[d.getDay()];
+      if (dayCounts[dayLabel]) {
+        dayCounts[dayLabel].orders += 1;
+        if (o.status === OrderStatus.DELIVERED) dayCounts[dayLabel].delivered += 1;
+        if (o.status === OrderStatus.FAILED) dayCounts[dayLabel].failed += 1;
+      }
+    });
+
+    const chartData = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map((day) => ({
+      day,
+      orders: dayCounts[day].orders,
+      delivered: dayCounts[day].delivered,
+      failed: dayCounts[day].failed,
+    }));
+
+    return {
+      totalOrders,
+      activeDrivers,
+      totalCOD,
+      successRate,
+      chartData,
+    };
+  }
+
   async getKpis(period: 'week' | 'month' | 'custom', startDate?: string, endDate?: string) {
     const { start, end } = this.getDateRange(period, startDate, endDate);
 

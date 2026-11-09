@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { TrackingController } from './tracking.controller';
 import { TrackingGateway } from './tracking.gateway';
 import { WsThrottlerGuard } from './guards/ws-throttler.guard';
+import { SimulationService } from './simulation.service';
 import { TrackingLog } from '../entities/tracking-log.entity';
 import { Shift } from '../entities/shift.entity';
 import { Driver } from '../entities/driver.entity';
@@ -24,7 +25,7 @@ import { AuthModule } from '../auth/auth.module';
     AuthModule, // provides JwtService for TrackingGateway JWT verification
   ],
   controllers: [TrackingController],
-  providers: [TrackingGateway, WsThrottlerGuard],
-  exports: [TrackingGateway, WsThrottlerGuard],
+  providers: [TrackingGateway, WsThrottlerGuard, SimulationService],
+  exports: [TrackingGateway, WsThrottlerGuard, SimulationService],
 })
 export class TrackingModule {}

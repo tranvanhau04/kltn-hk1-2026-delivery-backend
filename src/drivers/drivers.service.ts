@@ -9,11 +9,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not } from 'typeorm';
 import { Driver, DriverShiftStatus } from '../entities/driver.entity';
 import { User, UserRole } from '../entities/user.entity';
+import { Depot } from '../entities/depot.entity';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { CreateDriverDto, UpdateDriverDto, UpdateShiftStatusDto, QueryDriverDto } from './dto';
 
 interface DriverRawRow {
   userId: string;
+  depotId?: string;
+  depotName?: string;
   licensePlate: string;
   vehicleType: string;
   maxWeightKg: string | number;
@@ -51,8 +54,11 @@ export class DriversService {
     const qb = this.driverRepo
       .createQueryBuilder('driver')
       .leftJoin(User, 'user', 'user.id = driver.user_id')
+      .leftJoin(Depot, 'depot', 'depot.id = driver.depot_id')
       .select([
         'driver.user_id AS userId',
+        'driver.depot_id AS depotId',
+        'depot.name AS depotName',
         'driver.license_plate AS licensePlate',
         'driver.vehicle_type AS vehicleType',
         'driver.max_weight_kg AS maxWeightKg',
@@ -63,6 +69,12 @@ export class DriversService {
         'user.email AS email',
         'user.status AS userStatus',
       ]);
+
+    if (query.hubId) {
+      qb.andWhere('driver.depot_id = :hubId', { hubId: query.hubId });
+    } else if (query.regionId) {
+      qb.andWhere('depot.region_id = :regionId', { regionId: query.regionId });
+    }
 
     if (query.vehicleType) {
       qb.andWhere('driver.vehicle_type = :vehicleType', {
@@ -94,6 +106,8 @@ export class DriversService {
 
     const formattedData = rawData.map((d: DriverRawRow) => ({
       userId: d.userId,
+      depotId: d.depotId,
+      depot: d.depotId ? { id: d.depotId, name: d.depotName } : null,
       licensePlate: d.licensePlate,
       vehicleType: d.vehicleType,
       maxWeightKg: Number(d.maxWeightKg),
@@ -128,7 +142,10 @@ export class DriversService {
       throw new ForbiddenException('Drivers are only allowed to view their own vehicle profile');
     }
 
-    const driver = await this.driverRepo.findOne({ where: { userId } });
+    const driver = await this.driverRepo.findOne({
+      where: { userId },
+      relations: ['depot'],
+    });
     if (!driver) {
       throw new NotFoundException(`Driver profile with user ID '${userId}' not found`);
     }
@@ -182,6 +199,7 @@ export class DriversService {
 
     const driver = this.driverRepo.create({
       userId,
+      depotId: dto.depotId,
       licensePlate: dto.licensePlate,
       vehicleType: dto.vehicleType,
       maxWeightKg: dto.maxWeightKg,
@@ -222,6 +240,10 @@ export class DriversService {
 
     if (dto.vehicleType) {
       driver.vehicleType = dto.vehicleType;
+    }
+
+    if (dto.depotId !== undefined) {
+      driver.depotId = dto.depotId;
     }
 
     if (dto.maxWeightKg !== undefined) {

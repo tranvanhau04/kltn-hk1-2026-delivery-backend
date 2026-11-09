@@ -1,4 +1,5 @@
 import { Shift } from './shift.entity';
+import { Depot } from './depot.entity';
 export declare enum DriverShiftStatus {
     OFFLINE = "OFFLINE",
     ONLINE_READY = "ONLINE_READY",
@@ -7,6 +8,8 @@ export declare enum DriverShiftStatus {
 }
 export declare class Driver {
     userId: string;
+    depotId: string | null;
+    depot: Depot | null;
     licensePlate: string;
     vehicleType: string;
     maxWeightKg: number;

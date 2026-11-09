@@ -15,6 +15,7 @@ export interface VrpOrder {
     weightKg: number;
     volumeM3: number;
     codAmount: number;
+    zoneId?: string | null;
     timeWindowStart?: number;
     timeWindowEnd?: number;
 }
@@ -26,6 +27,7 @@ export interface VrpDriver {
     vehicleType: string;
     maxWeightKg: number;
     maxVolumeM3: number;
+    zoneIds?: string[];
 }
 export interface VrpStopResult {
     sequenceNo: number;
@@ -71,5 +73,9 @@ export interface VrpSolutionResult {
 }
 export declare class VrpService {
     private readonly logger;
-    solve(depot: VrpDepot, orders: VrpOrder[], drivers: VrpDriver[]): Promise<VrpSolutionResult>;
+    prepareOptimizationPayload(orders: VrpOrder[], drivers: VrpDriver[], zoneId?: string): {
+        clusteredOrders: VrpOrder[];
+        availableDrivers: VrpDriver[];
+    };
+    solve(depot: VrpDepot, orders: VrpOrder[], drivers: VrpDriver[], zoneId?: string): Promise<VrpSolutionResult>;
 }

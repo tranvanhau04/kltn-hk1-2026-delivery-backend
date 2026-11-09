@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, Brackets } from 'typeorm';
 import * as xlsx from 'xlsx';
@@ -7,6 +7,7 @@ import { Order, OrderStatus } from '../entities/order.entity';
 import { Depot } from '../entities/depot.entity';
 import { OrderStatusHistory } from '../entities/order-status-history.entity';
 import { GeocodingService } from '../geocoding/geocoding.service';
+import { TrackingGateway } from '../tracking/tracking.gateway';
 import { UpdateCoordinatesDto } from './dto/update-coordinates.dto';
 import { QueryOrderDto } from './dto/query-order.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -26,12 +27,16 @@ export class OrdersService {
     private readonly historyRepo: Repository<OrderStatusHistory>,
     private readonly geocodingService: GeocodingService,
     private readonly dataSource: DataSource,
+    @Optional()
+    private readonly trackingGateway?: TrackingGateway,
   ) {}
 
   /** Returns all orders based on query filters */
   async findAll(query: QueryOrderDto): Promise<{ data: Order[]; total: number }> {
-    const { status, zoneId, search, page = 1, limit = 50 } = query;
-    const qb = this.orderRepo.createQueryBuilder('order');
+    const { status, zoneId, hubId, regionId, search, page = 1, limit = 50 } = query;
+    const qb = this.orderRepo
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.depot', 'depot');
 
     if (status) {
       if (Array.isArray(status)) {
@@ -39,6 +44,14 @@ export class OrdersService {
       } else {
         qb.andWhere('order.status = :status', { status });
       }
+    }
+
+    if (hubId) {
+      qb.andWhere('order.depot_id = :hubId', { hubId });
+    }
+
+    if (regionId) {
+      qb.andWhere('depot.region_id = :regionId', { regionId });
     }
 
     if (zoneId) {
@@ -64,21 +77,44 @@ export class OrdersService {
     return { data, total };
   }
 
-  /** Returns orders with status NEW */
-  findPool(): Promise<Order[]> {
-    return this.orderRepo.find({
-      where: { status: OrderStatus.NEW },
-      order: { createdAt: 'DESC' },
-    });
+  /** Returns orders with status NEW filtered by hubId or regionId (or all if neither) */
+  async findPool(hubId?: string, regionId?: string): Promise<Order[]> {
+    const qb = this.orderRepo
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.depot', 'depot')
+      .where('order.status = :status', { status: OrderStatus.NEW });
+
+    if (hubId) {
+      qb.andWhere('order.depot_id = :hubId', { hubId });
+    } else if (regionId) {
+      qb.andWhere('depot.region_id = :regionId', { regionId });
+    }
+
+    qb.orderBy('order.createdAt', 'DESC');
+    return qb.getMany();
   }
 
   /** Returns a single order by ID */
   async findById(id: string): Promise<Order> {
-    const order = await this.orderRepo.findOne({ where: { id } });
+    const order = await this.orderRepo.findOne({ where: { id }, relations: ['depot'] });
     if (!order) {
       throw new NotFoundException(`Không tìm thấy đơn hàng với ID: ${id}`);
     }
     return order;
+  }
+
+  /** Returns active orders assigned to a driver through today's routes and stops */
+  async findOrdersByDriver(driverId: string): Promise<Order[]> {
+    return this.orderRepo
+      .createQueryBuilder('order')
+      .innerJoin('stops', 'stop', 'stop.order_id = order.id')
+      .innerJoin('routes', 'route', 'route.id = stop.route_id')
+      .where('route.driver_id = :driverId', { driverId })
+      .andWhere('route.status IN (:...routeStatuses)', {
+        routeStatuses: ['PLANNED', 'IN_PROGRESS'],
+      })
+      .orderBy('stop.sequence_no', 'ASC')
+      .getMany();
   }
 
   /** Creates a single new order */
@@ -93,13 +129,16 @@ export class OrdersService {
     order.volumeM3 = dto.volumeM3 ?? 0;
     order.codAmount = dto.codAmount ?? 0;
     order.zoneId = dto.zoneId ?? null;
+    order.depotId = dto.depotId ?? null;
     order.status = OrderStatus.NEW;
 
     let lat = dto.latitude;
     let lng = dto.longitude;
 
     if (!lat || !lng || lat === 0 || lng === 0) {
-      const depot = await this.depotRepo.findOne({ where: {} });
+      const depot = await this.depotRepo.findOne({
+        where: dto.depotId ? { id: dto.depotId } : {},
+      });
       const fallbackLat = depot ? Number(depot.latitude) : DEFAULT_DEPOT_LAT;
       const fallbackLng = depot ? Number(depot.longitude) : DEFAULT_DEPOT_LNG;
       const geo = await this.geocodingService.geocodeAddress(
@@ -149,6 +188,98 @@ export class OrdersService {
   }
 
   /**
+   * PATCH /orders/:id/status
+   * Updates an order's status and records status transition in history.
+   * If transitioning to ASSIGNED, emits real-time WebSocket notification to the driver.
+   */
+  async updateStatus(
+    id: string,
+    status: OrderStatus,
+    note?: string,
+    driverId?: string,
+  ): Promise<Order> {
+    const order = await this.findById(id);
+
+    if (order.status === status) {
+      return order;
+    }
+
+    order.status = status;
+    order.updatedAt = new Date();
+
+    const history = new OrderStatusHistory();
+    history.orderId = order.id;
+    history.status = status;
+    history.note = note || `Cập nhật trạng thái sang ${status}`;
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.save(Order, order);
+      await manager.save(OrderStatusHistory, history);
+    });
+
+    if (status === OrderStatus.ASSIGNED && this.trackingGateway) {
+      let targetDriverId = driverId;
+      if (!targetDriverId) {
+        try {
+          const stopRows = await this.dataSource.query(
+            `SELECT r.driver_id FROM stops s INNER JOIN routes r ON r.id = s.route_id WHERE s.order_id = $1 LIMIT 1`,
+            [order.id],
+          );
+          if (stopRows?.[0]?.driver_id) {
+            targetDriverId = stopRows[0].driver_id;
+          }
+        } catch {
+          // ignore query error in test/mock environment
+        }
+      }
+
+      if (targetDriverId) {
+        this.trackingGateway.notifyDriverNewAssignment(targetDriverId, {
+          message: 'Bạn có đơn hàng mới!',
+          orderId: order.id,
+          orderCode: order.code,
+          status: OrderStatus.ASSIGNED,
+          assignedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    return order;
+  }
+
+  /**
+   * Assigns an order directly to a driver, updates status to ASSIGNED,
+   * and notifies the driver in real-time via WebSocket.
+   */
+  async assignDriver(orderId: string, driverId: string, note?: string): Promise<Order> {
+    const order = await this.findById(orderId);
+    order.status = OrderStatus.ASSIGNED;
+    order.updatedAt = new Date();
+
+    const history = new OrderStatusHistory();
+    history.orderId = order.id;
+    history.status = OrderStatus.ASSIGNED;
+    history.note = note || `Đơn hàng được phân công cho tài xế ${driverId}`;
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.save(Order, order);
+      await manager.save(OrderStatusHistory, history);
+    });
+
+    if (this.trackingGateway) {
+      this.trackingGateway.notifyDriverNewAssignment(driverId, {
+        message: 'Bạn có đơn hàng mới!',
+        orderId: order.id,
+        orderCode: order.code,
+        status: OrderStatus.ASSIGNED,
+        assignedAt: new Date().toISOString(),
+      });
+    }
+
+    return order;
+  }
+
+  /**
    * Geocode an order's address if lat/lng is missing or zero.
    * Uses the first depot's coordinates as fallback.
    */
@@ -162,7 +293,9 @@ export class OrdersService {
     if (!needsGeocoding) return order;
 
     // Fetch depot fallback
-    const depot = await this.depotRepo.findOne({ where: {} });
+    const depot = await this.depotRepo.findOne({
+      where: order.depotId ? { id: order.depotId } : {},
+    });
     const fallbackLat = depot ? Number(depot.latitude) : DEFAULT_DEPOT_LAT;
     const fallbackLng = depot ? Number(depot.longitude) : DEFAULT_DEPOT_LNG;
 
@@ -271,6 +404,7 @@ export class OrdersService {
         order.longitude = lng;
 
         const history = new OrderStatusHistory();
+        history.id = crypto.randomUUID();
         history.orderId = order.id;
         history.status = OrderStatus.NEW;
         history.note = 'Import từ file Excel';
@@ -284,10 +418,10 @@ export class OrdersService {
 
     if (validRows.length > 0) {
       await this.dataSource.transaction(async (manager) => {
-        for (const { order, history } of validRows) {
-          await manager.save(Order, order);
-          await manager.save(OrderStatusHistory, history);
-        }
+        const orders = validRows.map((r) => r.order);
+        const histories = validRows.map((r) => r.history);
+        await manager.insert(Order, orders);
+        await manager.insert(OrderStatusHistory, histories);
       });
     }
 

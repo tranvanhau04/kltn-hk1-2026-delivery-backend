@@ -4,6 +4,7 @@ import { Driver } from '../entities/driver.entity';
 import { Route } from '../entities/route.entity';
 import { Stop } from '../entities/stop.entity';
 import { User } from '../entities/user.entity';
+import { SimulationService } from './simulation.service';
 interface LocationDto {
     driverId: string;
     lat: number;
@@ -17,7 +18,19 @@ export declare class TrackingController {
     private readonly routeRepo;
     private readonly stopRepo;
     private readonly userRepo;
-    constructor(logRepo: Repository<TrackingLog>, driverRepo: Repository<Driver>, routeRepo: Repository<Route>, stopRepo: Repository<Stop>, userRepo: Repository<User>);
+    private readonly simulationService;
+    constructor(logRepo: Repository<TrackingLog>, driverRepo: Repository<Driver>, routeRepo: Repository<Route>, stopRepo: Repository<Stop>, userRepo: Repository<User>, simulationService: SimulationService);
+    startSimulation(): {
+        success: boolean;
+        message: string;
+    };
+    stopSimulation(): {
+        success: boolean;
+        message: string;
+    };
+    getSimulationStatus(): {
+        isRunning: boolean;
+    };
     liveTracking(): Promise<{
         driverId: string;
         fullName: string;
@@ -46,6 +59,7 @@ export declare class TrackingController {
         message: string;
         route: null;
         stops: never[];
+        orders?: undefined;
     } | {
         success: boolean;
         route: {
@@ -70,11 +84,28 @@ export declare class TrackingController {
                 receiverName: string;
                 receiverPhone: string;
                 deliveryAddress: string;
+                latitude: number;
+                longitude: number;
                 lat: number;
                 lng: number;
                 codAmount: number;
                 status: import("../entities/order.entity").OrderStatus;
+                createdAt: Date;
             } | null;
+        }[];
+        orders: {
+            id: string;
+            code: string;
+            receiverName: string;
+            receiverPhone: string;
+            deliveryAddress: string;
+            latitude: number;
+            longitude: number;
+            codAmount: number;
+            status: import("../entities/order.entity").OrderStatus;
+            stopStatus: string;
+            sequenceNo: number;
+            createdAt: Date;
         }[];
         message?: undefined;
     }>;

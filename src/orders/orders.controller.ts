@@ -14,7 +14,7 @@ import { OrdersService } from './orders.service';
 import { UpdateCoordinatesDto } from './dto/update-coordinates.dto';
 import { QueryOrderDto } from './dto/query-order.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
-import { Order } from '../entities/order.entity';
+import { Order, OrderStatus } from '../entities/order.entity';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../entities/user.entity';
 
@@ -38,9 +38,22 @@ export class OrdersController {
 
   /** GET /api/orders/pool — unassigned NEW orders for VRP */
   @Get('pool')
-  @Roles(UserRole.ADMIN)
-  findPool(): Promise<Order[]> {
-    return this.ordersService.findPool();
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  findPool(
+    @Query('hubId') hubId?: string,
+    @Query('regionId') regionId?: string,
+  ): Promise<Order[]> {
+    return this.ordersService.findPool(hubId, regionId);
+  }
+
+  /**
+   * GET /api/orders/driver/:driverId/today
+   * Returns active orders assigned to the specified driver today.
+   */
+  @Get('driver/:driverId/today')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  getDriverOrdersToday(@Param('driverId') driverId: string): Promise<Order[]> {
+    return this.ordersService.findOrdersByDriver(driverId);
   }
 
   /** GET /api/orders/:id — single order detail */
@@ -59,6 +72,36 @@ export class OrdersController {
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   updateCoordinates(@Param('id') id: string, @Body() dto: UpdateCoordinatesDto): Promise<Order> {
     return this.ordersService.updateCoordinates(id, dto);
+  }
+
+  /**
+   * PATCH /api/orders/:id/status
+   * Allows a Dispatcher or Admin to update an order's status directly.
+   * If status is ASSIGNED, emits real-time WebSocket notification to the driver.
+   */
+  @Patch(':id/status')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  updateStatus(
+    @Param('id') id: string,
+    @Body('status') status: OrderStatus,
+    @Body('note') note?: string,
+    @Body('driverId') driverId?: string,
+  ): Promise<Order> {
+    return this.ordersService.updateStatus(id, status, note, driverId);
+  }
+
+  /**
+   * PATCH /api/orders/:id/assign
+   * Assigns an order directly to a driver and emits a real-time WebSocket notification.
+   */
+  @Patch(':id/assign')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  assignDriver(
+    @Param('id') id: string,
+    @Body('driverId') driverId: string,
+    @Body('note') note?: string,
+  ): Promise<Order> {
+    return this.ordersService.assignDriver(id, driverId, note);
   }
 
   /**

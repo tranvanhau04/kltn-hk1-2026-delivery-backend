@@ -13,6 +13,7 @@ const core_1 = require("@nestjs/core");
 const app_controller_1 = require("./app.controller");
 const app_service_1 = require("./app.service");
 const database_module_1 = require("./database/database.module");
+const regions_module_1 = require("./regions/regions.module");
 const depots_module_1 = require("./depots/depots.module");
 const orders_module_1 = require("./orders/orders.module");
 const vrp_module_1 = require("./vrp/vrp.module");
@@ -52,6 +53,7 @@ exports.AppModule = AppModule = __decorate([
             auth_module_1.AuthModule,
             users_module_1.UsersModule,
             database_module_1.DatabaseModule,
+            regions_module_1.RegionsModule,
             depots_module_1.DepotsModule,
             orders_module_1.OrdersModule,
             vrp_module_1.VrpModule,

@@ -15,12 +15,16 @@ const order_entity_1 = require("../entities/order.entity");
 const depot_entity_1 = require("../entities/depot.entity");
 const order_status_history_entity_1 = require("../entities/order-status-history.entity");
 const geocoding_service_1 = require("../geocoding/geocoding.service");
+const tracking_module_1 = require("../tracking/tracking.module");
 let OrdersModule = class OrdersModule {
 };
 exports.OrdersModule = OrdersModule;
 exports.OrdersModule = OrdersModule = __decorate([
     (0, common_1.Module)({
-        imports: [typeorm_1.TypeOrmModule.forFeature([order_entity_1.Order, depot_entity_1.Depot, order_status_history_entity_1.OrderStatusHistory])],
+        imports: [
+            typeorm_1.TypeOrmModule.forFeature([order_entity_1.Order, depot_entity_1.Depot, order_status_history_entity_1.OrderStatusHistory]),
+            tracking_module_1.TrackingModule,
+        ],
         controllers: [orders_controller_1.OrdersController],
         providers: [orders_service_1.OrdersService, geocoding_service_1.GeocodingService],
         exports: [orders_service_1.OrdersService, geocoding_service_1.GeocodingService],

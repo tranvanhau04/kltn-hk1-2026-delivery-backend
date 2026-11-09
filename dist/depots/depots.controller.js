@@ -17,20 +17,27 @@ const common_1 = require("@nestjs/common");
 const typeorm_1 = require("@nestjs/typeorm");
 const typeorm_2 = require("typeorm");
 const depot_entity_1 = require("../entities/depot.entity");
+const public_decorator_1 = require("../auth/decorators/public.decorator");
 let DepotsController = class DepotsController {
     depotRepo;
     constructor(depotRepo) {
         this.depotRepo = depotRepo;
     }
-    findAll() {
-        return this.depotRepo.find();
+    findAll(regionId) {
+        return this.depotRepo.find({
+            where: regionId ? { regionId } : {},
+            relations: ['region'],
+            order: { name: 'ASC' },
+        });
     }
 };
 exports.DepotsController = DepotsController;
 __decorate([
+    (0, public_decorator_1.Public)(),
     (0, common_1.Get)(),
+    __param(0, (0, common_1.Query)('regionId')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", Promise)
 ], DepotsController.prototype, "findAll", null);
 exports.DepotsController = DepotsController = __decorate([

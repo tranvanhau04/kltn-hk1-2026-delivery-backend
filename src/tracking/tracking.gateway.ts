@@ -18,6 +18,7 @@ import { WsThrottlerGuard } from './guards/ws-throttler.guard';
 import { TrackingLog } from '../entities/tracking-log.entity';
 import { Shift, ShiftStatus } from '../entities/shift.entity';
 import { User, UserRole } from '../entities/user.entity';
+import { Driver, DriverShiftStatus } from '../entities/driver.entity';
 
 interface UpdateLocationPayload {
   shiftId?: string;
@@ -78,6 +79,9 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+
+    @InjectRepository(Driver)
+    private readonly driverRepo: Repository<Driver>,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -241,6 +245,18 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     });
     const savedLog = await this.trackingLogRepo.save(log);
 
+    // Ensure driver entity is not marked OFFLINE when transmitting active GPS
+    try {
+      const driverRecord = await this.driverRepo.findOne({ where: { userId: driverId } });
+      if (driverRecord && driverRecord.currentShiftStatus === DriverShiftStatus.OFFLINE) {
+        driverRecord.currentShiftStatus = DriverShiftStatus.ONLINE_READY;
+        await this.driverRepo.save(driverRecord);
+        this.logger.log(`[WS] Driver ${driverId} marked ONLINE_READY upon GPS reception`);
+      }
+    } catch (driverErr) {
+      this.logger.warn(`[WS] Could not update driver shift status:`, driverErr);
+    }
+
     this.logger.debug(
       `[WS] DRIVER ${driverId} location saved: (${latitude}, ${longitude}), shiftId=${resolvedShiftId}`,
     );
@@ -264,5 +280,50 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     );
 
     return { success: true, message: 'Location updated and broadcasted' };
+  }
+
+  /**
+   * Broadcasts real-time dispatch notification to the driver's private socket room `driver_<userId>`.
+   * Emits `new_route_assigned` to the mobile app client.
+   */
+  public notifyDriverNewAssignment(driverId: string, payload: any): void {
+    if (!this.server) {
+      this.logger.warn(`[WS] Server not ready, cannot emit to driver_${driverId}`);
+      return;
+    }
+
+    const room = 'driver_' + driverId;
+    this.server.to(room).emit('new_route_assigned', payload);
+    this.server.to(room).emit('server:new_route_assigned', payload);
+    this.logger.log(`[WS] Emitted new_route_assigned → room: ${room}`);
+  }
+
+  /**
+   * Emits `server:new_route_assigned` and `new_route_assigned` to the driver's private socket room `driver_${driverId}`.
+   */
+  notifyRouteAssigned(
+    driverId: string,
+    payload: {
+      routeId: string;
+      routeCode: string;
+      driverId: string;
+      stopCount: number;
+      totalDistanceKm?: number;
+      totalEstimatedTimeMin?: number;
+      message: string;
+      assignedAt: string;
+    },
+  ): void {
+    if (!this.server) {
+      this.logger.warn(`[WS] Server not ready, cannot emit to driver_${driverId}`);
+      return;
+    }
+
+    const room = `driver_${driverId}`;
+    this.server.to(room).emit('server:new_route_assigned', payload);
+    this.server.to(room).emit('new_route_assigned', payload);
+    this.logger.log(
+      `[WS] Emitted server:new_route_assigned & new_route_assigned → room: ${room} (route: ${payload.routeCode}, stops: ${payload.stopCount})`,
+    );
   }
 }

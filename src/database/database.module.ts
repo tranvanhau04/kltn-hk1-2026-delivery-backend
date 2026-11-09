@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { Region } from '../entities/region.entity';
 import { Depot } from '../entities/depot.entity';
 import { Order } from '../entities/order.entity';
 import { Driver } from '../entities/driver.entity';
@@ -24,6 +25,7 @@ import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
       password: 'sapassword',
       database: 'delivery_db',
       entities: [
+        Region,
         Depot,
         Order,
         Driver,

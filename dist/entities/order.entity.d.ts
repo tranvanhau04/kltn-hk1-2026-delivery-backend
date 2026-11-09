@@ -1,3 +1,4 @@
+import { Depot } from './depot.entity';
 export declare enum OrderStatus {
     NEW = "NEW",
     ASSIGNED = "ASSIGNED",
@@ -10,6 +11,8 @@ export declare enum OrderStatus {
 export declare class Order {
     id: string;
     code: string;
+    depotId: string | null;
+    depot: Depot | null;
     dispatcherId: string | null;
     zoneId: string | null;
     receiverName: string;

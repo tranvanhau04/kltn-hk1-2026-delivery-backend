@@ -11,8 +11,11 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Depot = void 0;
 const typeorm_1 = require("typeorm");
+const region_entity_1 = require("./region.entity");
 let Depot = class Depot {
     id;
+    regionId;
+    region;
     name;
     address;
     latitude;
@@ -23,6 +26,15 @@ __decorate([
     (0, typeorm_1.PrimaryColumn)({ type: 'varchar', length: 36 }),
     __metadata("design:type", String)
 ], Depot.prototype, "id", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ name: 'region_id', type: 'varchar', length: 36, nullable: true }),
+    __metadata("design:type", String)
+], Depot.prototype, "regionId", void 0);
+__decorate([
+    (0, typeorm_1.ManyToOne)(() => region_entity_1.Region, (region) => region.hubs, { onDelete: 'RESTRICT' }),
+    (0, typeorm_1.JoinColumn)({ name: 'region_id' }),
+    __metadata("design:type", region_entity_1.Region)
+], Depot.prototype, "region", void 0);
 __decorate([
     (0, typeorm_1.Column)({ name: 'name', type: 'varchar', length: 150 }),
     __metadata("design:type", String)

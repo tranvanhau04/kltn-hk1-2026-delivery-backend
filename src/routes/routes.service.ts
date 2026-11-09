@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, In } from 'typeorm';
@@ -15,6 +16,7 @@ import { Driver } from '../entities/driver.entity';
 import { Depot } from '../entities/depot.entity';
 import { User } from '../entities/user.entity';
 import { OrderStatusHistory } from '../entities/order-status-history.entity';
+import { TrackingGateway } from '../tracking/tracking.gateway';
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -81,6 +83,7 @@ export class RoutesService {
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(OrderStatusHistory)
     private readonly historyRepo: Repository<OrderStatusHistory>,
+    @Optional() private readonly trackingGateway?: TrackingGateway,
   ) {}
 
   /**
@@ -124,26 +127,6 @@ export class RoutesService {
       throw new ConflictException(`Duplicate order IDs across routes: ${dups.join(', ')}`);
     }
 
-    const existingOrders = await this.orderRepo.find({
-      where: { id: In(uniqueOrderIds) },
-    });
-    const orderMap = new Map(existingOrders.map((o) => [o.id, o]));
-
-    // Check for missing order IDs
-    const missingIds = uniqueOrderIds.filter((id) => !orderMap.has(id));
-    if (missingIds.length > 0) {
-      throw new NotFoundException(`Order IDs not found: ${missingIds.join(', ')}`);
-    }
-
-    // Check for orders already assigned
-    const alreadyAssigned = existingOrders.filter((o) => o.status !== OrderStatus.NEW);
-    if (alreadyAssigned.length > 0) {
-      const summary = alreadyAssigned.map((o) => `${o.code} (${o.status})`).join(', ');
-      throw new ConflictException(
-        `These orders are not in NEW status and cannot be re-assigned: ${summary}`,
-      );
-    }
-
     // Validate depots and drivers
     for (const r of dto.routes) {
       const depot = await this.depotRepo.findOne({ where: { id: r.depotId } });
@@ -151,15 +134,42 @@ export class RoutesService {
 
       const driver = await this.driverRepo.findOne({ where: { userId: r.driverId } });
       if (!driver) throw new NotFoundException(`Driver not found: ${r.driverId}`);
+
+      // Enterprise Constraint A: Strict Hub Ownership for Drivers
+      if (driver.depotId && driver.depotId !== r.depotId) {
+        throw new BadRequestException('Tài xế không thuộc Kho điều phối hiện tại');
+      }
     }
 
-    // ── Execute all inserts in a single atomic transaction ──────────────────
+    // ── Execute all checks and updates inside a strict atomic transaction with Pessimistic Locking ──
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
+      // 2. Query unassigned orders using Pessimistic Write Lock (SELECT ... FOR UPDATE)
+      // to strictly prevent a race condition where two dispatchers assign the same order simultaneously.
+      const existingOrders = await queryRunner.manager.find(Order, {
+        where: { id: In(uniqueOrderIds) },
+        lock: { mode: 'pessimistic_write' },
+      });
+      const orderMap = new Map(existingOrders.map((o) => [o.id, o]));
+
+      // Check for missing order IDs
+      const missingIds = uniqueOrderIds.filter((id) => !orderMap.has(id));
+      if (missingIds.length > 0) {
+        throw new NotFoundException(`Order IDs not found: ${missingIds.join(', ')}`);
+      }
+
+      // Check for orders already assigned
+      const alreadyAssigned = existingOrders.filter((o) => o.status !== OrderStatus.NEW);
+      if (alreadyAssigned.length > 0) {
+        const summary = alreadyAssigned.map((o) => `${o.code} (${o.status})`).join(', ');
+        throw new ConflictException(
+          `These orders are not in NEW status and cannot be re-assigned: ${summary}`,
+        );
+      }
       for (const r of dto.routes) {
         const routeId = crypto.randomUUID();
         const routeCode = this.generateRouteCode();
@@ -191,6 +201,11 @@ export class RoutesService {
         // 4. INSERT stops in sequence order
         const sortedStops = [...r.stops].sort((a, b) => a.sequenceNo - b.sequenceNo);
         for (const s of sortedStops) {
+          const ord = orderMap.get(s.orderId);
+          if (ord && ord.depotId && ord.depotId !== r.depotId) {
+            throw new BadRequestException('Đơn hàng không thuộc quyền quản lý của Kho hiện tại');
+          }
+
           const stopId = crypto.randomUUID();
           await queryRunner.manager.insert(Stop, {
             id: stopId,
@@ -239,6 +254,25 @@ export class RoutesService {
       this.logger.log(
         `Confirmed ${confirmedRoutes.length} routes with ${allOrderIds.length} orders assigned`,
       );
+
+      // 8. Real-time notification: emit new_route_assigned to each assigned driver's private room
+      if (this.trackingGateway) {
+        for (const cr of confirmedRoutes) {
+          const originalRoute = dto.routes.find((r) => r.driverId === cr.driverId);
+          const payload = {
+            routeId: cr.routeId,
+            routeCode: cr.routeCode,
+            driverId: cr.driverId,
+            stopCount: cr.stopCount,
+            totalDistanceKm: originalRoute?.totalDistanceKm,
+            totalEstimatedTimeMin: originalRoute?.totalEstimatedTimeMin,
+            message: `Bạn vừa nhận được một chuyến đi mới: Tuyến ${cr.routeCode} (${cr.stopCount} điểm dừng)!`,
+            assignedAt: new Date().toISOString(),
+          };
+          this.trackingGateway.notifyRouteAssigned(cr.driverId, payload);
+          this.trackingGateway.notifyDriverNewAssignment?.(cr.driverId, payload);
+        }
+      }
     } catch (err) {
       await queryRunner.rollbackTransaction();
       this.logger.error(`Route confirmation ROLLED BACK: ${(err as Error).message}`);

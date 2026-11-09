@@ -15,6 +15,7 @@ import { Driver } from '../entities/driver.entity';
 import { Depot } from '../entities/depot.entity';
 import { User } from '../entities/user.entity';
 import { OrderStatusHistory } from '../entities/order-status-history.entity';
+import { TrackingGateway } from '../tracking/tracking.gateway';
 
 // ── Mock Factories ────────────────────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ function buildQueryRunnerMock() {
       insert: jest.fn().mockResolvedValue({}),
       update: jest.fn().mockResolvedValue({}),
       findOne: jest.fn().mockResolvedValue(null),
+      find: jest.fn().mockResolvedValue([]),
     },
   };
 }
@@ -106,8 +108,16 @@ describe('RoutesService', () => {
     createQueryRunner: jest.fn(),
   };
 
+  const mockTrackingGateway = {
+    notifyRouteAssigned: jest.fn(),
+    notifyDriverNewAssignment: jest.fn(),
+  };
+
   beforeEach(async () => {
     mockQueryRunner = buildQueryRunnerMock();
+    mockQueryRunner.manager.find = jest
+      .fn()
+      .mockImplementation((entity, opts) => mockOrderRepo.find(opts));
     mockDataSource.createQueryRunner.mockReturnValue(mockQueryRunner);
 
     const module: TestingModule = await Test.createTestingModule({
@@ -121,6 +131,7 @@ describe('RoutesService', () => {
         { provide: getRepositoryToken(Depot), useValue: mockDepotRepo },
         { provide: getRepositoryToken(User), useValue: mockUserRepo },
         { provide: getRepositoryToken(OrderStatusHistory), useValue: mockHistoryRepo },
+        { provide: TrackingGateway, useValue: mockTrackingGateway },
       ],
     }).compile();
 
@@ -226,6 +237,25 @@ describe('RoutesService', () => {
       expect(result.routes[0].stopCount).toBe(2);
       expect(result.routes[0].driverId).toBe('driver-1');
       expect(result.message).toContain('confirmed');
+    });
+
+    it('should emit server:new_route_assigned via trackingGateway for each confirmed route', async () => {
+      mockOrderRepo.find.mockResolvedValue([makeMockOrder('order-1'), makeMockOrder('order-2')]);
+      mockDepotRepo.findOne.mockResolvedValue(makeMockDepot());
+      mockDriverRepo.findOne.mockResolvedValue(makeMockDriver('driver-1'));
+      mockQueryRunner.manager.findOne.mockResolvedValue(makeMockUser('driver-1'));
+
+      await service.confirmRoutes(validDto, 'dispatcher-1');
+
+      expect(mockTrackingGateway.notifyRouteAssigned).toHaveBeenCalledTimes(1);
+      expect(mockTrackingGateway.notifyRouteAssigned).toHaveBeenCalledWith(
+        'driver-1',
+        expect.objectContaining({
+          driverId: 'driver-1',
+          stopCount: 2,
+          message: expect.stringContaining('chuyến đi mới'),
+        }),
+      );
     });
 
     it('should call commitTransaction on success', async () => {

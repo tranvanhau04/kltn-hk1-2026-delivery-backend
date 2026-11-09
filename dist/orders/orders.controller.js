@@ -19,6 +19,7 @@ const orders_service_1 = require("./orders.service");
 const update_coordinates_dto_1 = require("./dto/update-coordinates.dto");
 const query_order_dto_1 = require("./dto/query-order.dto");
 const create_order_dto_1 = require("./dto/create-order.dto");
+const order_entity_1 = require("../entities/order.entity");
 const roles_decorator_1 = require("../auth/decorators/roles.decorator");
 const user_entity_1 = require("../entities/user.entity");
 let OrdersController = class OrdersController {
@@ -32,14 +33,23 @@ let OrdersController = class OrdersController {
     findAll(query) {
         return this.ordersService.findAll(query);
     }
-    findPool() {
-        return this.ordersService.findPool();
+    findPool(hubId, regionId) {
+        return this.ordersService.findPool(hubId, regionId);
+    }
+    getDriverOrdersToday(driverId) {
+        return this.ordersService.findOrdersByDriver(driverId);
     }
     findOne(id) {
         return this.ordersService.findById(id);
     }
     updateCoordinates(id, dto) {
         return this.ordersService.updateCoordinates(id, dto);
+    }
+    updateStatus(id, status, note, driverId) {
+        return this.ordersService.updateStatus(id, status, note, driverId);
+    }
+    assignDriver(id, driverId, note) {
+        return this.ordersService.assignDriver(id, driverId, note);
     }
     async importExcel(file) {
         try {
@@ -74,11 +84,21 @@ __decorate([
 ], OrdersController.prototype, "findAll", null);
 __decorate([
     (0, common_1.Get)('pool'),
-    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN),
+    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),
+    __param(0, (0, common_1.Query)('hubId')),
+    __param(1, (0, common_1.Query)('regionId')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [String, String]),
     __metadata("design:returntype", Promise)
 ], OrdersController.prototype, "findPool", null);
+__decorate([
+    (0, common_1.Get)('driver/:driverId/today'),
+    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),
+    __param(0, (0, common_1.Param)('driverId')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", Promise)
+], OrdersController.prototype, "getDriverOrdersToday", null);
 __decorate([
     (0, common_1.Get)(':id'),
     (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),
@@ -96,6 +116,27 @@ __decorate([
     __metadata("design:paramtypes", [String, update_coordinates_dto_1.UpdateCoordinatesDto]),
     __metadata("design:returntype", Promise)
 ], OrdersController.prototype, "updateCoordinates", null);
+__decorate([
+    (0, common_1.Patch)(':id/status'),
+    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)('status')),
+    __param(2, (0, common_1.Body)('note')),
+    __param(3, (0, common_1.Body)('driverId')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String, String]),
+    __metadata("design:returntype", Promise)
+], OrdersController.prototype, "updateStatus", null);
+__decorate([
+    (0, common_1.Patch)(':id/assign'),
+    (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Body)('driverId')),
+    __param(2, (0, common_1.Body)('note')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", Promise)
+], OrdersController.prototype, "assignDriver", null);
 __decorate([
     (0, common_1.Post)('import-excel'),
     (0, roles_decorator_1.Roles)(user_entity_1.UserRole.ADMIN, user_entity_1.UserRole.DISPATCHER),

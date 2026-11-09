@@ -1,5 +1,6 @@
-import { Entity, Column, PrimaryColumn, OneToMany } from 'typeorm';
+import { Entity, Column, PrimaryColumn, OneToMany, ManyToOne, JoinColumn } from 'typeorm';
 import { Shift } from './shift.entity';
+import { Depot } from './depot.entity';
 
 export enum DriverShiftStatus {
   OFFLINE = 'OFFLINE',
@@ -16,6 +17,13 @@ export enum DriverShiftStatus {
 export class Driver {
   @PrimaryColumn({ name: 'user_id', type: 'varchar', length: 36 })
   userId: string;
+
+  @Column({ name: 'depot_id', type: 'varchar', length: 36, nullable: true })
+  depotId: string | null;
+
+  @ManyToOne(() => Depot, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'depot_id' })
+  depot: Depot | null;
 
   @Column({ name: 'license_plate', type: 'varchar', length: 20 })
   licensePlate: string;

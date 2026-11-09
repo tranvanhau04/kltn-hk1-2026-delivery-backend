@@ -11,6 +11,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Order = exports.OrderStatus = void 0;
 const typeorm_1 = require("typeorm");
+const depot_entity_1 = require("./depot.entity");
 var OrderStatus;
 (function (OrderStatus) {
     OrderStatus["NEW"] = "NEW";
@@ -24,6 +25,8 @@ var OrderStatus;
 let Order = class Order {
     id;
     code;
+    depotId;
+    depot;
     dispatcherId;
     zoneId;
     receiverName;
@@ -47,6 +50,15 @@ __decorate([
     (0, typeorm_1.Column)({ name: 'code', type: 'varchar', length: 50 }),
     __metadata("design:type", String)
 ], Order.prototype, "code", void 0);
+__decorate([
+    (0, typeorm_1.Column)({ name: 'depot_id', type: 'varchar', length: 36, nullable: true }),
+    __metadata("design:type", Object)
+], Order.prototype, "depotId", void 0);
+__decorate([
+    (0, typeorm_1.ManyToOne)(() => depot_entity_1.Depot, { nullable: true, onDelete: 'SET NULL' }),
+    (0, typeorm_1.JoinColumn)({ name: 'depot_id' }),
+    __metadata("design:type", Object)
+], Order.prototype, "depot", void 0);
 __decorate([
     (0, typeorm_1.Column)({ name: 'dispatcher_id', type: 'varchar', length: 36, nullable: true }),
     __metadata("design:type", Object)
