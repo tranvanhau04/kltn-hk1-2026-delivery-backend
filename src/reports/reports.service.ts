@@ -51,20 +51,15 @@ export class ReportsService {
     const codResult = await this.orderRepo
       .createQueryBuilder('order')
       .select('SUM(order.codAmount)', 'total')
-      .getRawOne();
-    const totalCOD = Number(codResult?.total || 0);
+      .getRawOne<{ total?: string | number }>();
+    const totalCOD = codResult?.total ? Number(codResult.total) : 0;
 
     const deliveredCount = await this.orderRepo.count({
       where: { status: OrderStatus.DELIVERED },
     });
-    const failedCount = await this.orderRepo.count({
-      where: { status: OrderStatus.FAILED },
-    });
 
     const successRate =
-      totalOrders > 0
-        ? Number(((deliveredCount / totalOrders) * 100).toFixed(1))
-        : 0;
+      totalOrders > 0 ? Number(((deliveredCount / totalOrders) * 100).toFixed(1)) : 0;
 
     // Group by day of week based on existing orders
     const daysOfWeek = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];

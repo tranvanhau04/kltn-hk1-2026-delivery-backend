@@ -13,10 +13,7 @@ import { Zone } from '../entities/zone.entity';
 import { ZoneDriver } from '../entities/zone-driver.entity';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([Order, Driver, Depot, User, Zone, ZoneDriver]),
-    RoutesModule,
-  ],
+  imports: [TypeOrmModule.forFeature([Order, Driver, Depot, User, Zone, ZoneDriver]), RoutesModule],
   controllers: [VrpController],
   providers: [VrpService, GraphService, MaxFlowService],
 })

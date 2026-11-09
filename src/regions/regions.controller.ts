@@ -19,4 +19,3 @@ export class RegionsController {
     return this.regionsService.findById(id);
   }
 }
-

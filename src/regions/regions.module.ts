@@ -11,4 +11,3 @@ import { RegionsController } from './regions.controller';
   exports: [RegionsService, TypeOrmModule],
 })
 export class RegionsModule {}
-

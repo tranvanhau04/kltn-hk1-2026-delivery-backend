@@ -7,6 +7,7 @@ import { Order, OrderStatus } from '../entities/order.entity';
 import { Depot } from '../entities/depot.entity';
 import { OrderStatusHistory } from '../entities/order-status-history.entity';
 import { Stop } from '../entities/stop.entity';
+import { Route } from '../entities/route.entity';
 import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
 import { GeocodingService } from '../geocoding/geocoding.service';
 import { TrackingGateway } from '../tracking/tracking.gateway';
@@ -274,12 +275,14 @@ export class OrdersService {
       let targetDriverId = driverId;
       if (!targetDriverId) {
         try {
-          const stopRows = await this.dataSource.query(
-            `SELECT r.driver_id FROM stops s INNER JOIN routes r ON r.id = s.route_id WHERE s.order_id = $1 LIMIT 1`,
-            [order.id],
-          );
-          if (stopRows?.[0]?.driver_id) {
-            targetDriverId = stopRows[0].driver_id;
+          const stop = await this.stopRepo.findOne({ where: { orderId: order.id } });
+          if (stop?.routeId) {
+            const route = await this.dataSource.getRepository(Route).findOne({
+              where: { id: stop.routeId },
+            });
+            if (route?.driverId) {
+              targetDriverId = route.driverId;
+            }
           }
         } catch {
           // ignore query error in test/mock environment

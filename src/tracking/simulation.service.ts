@@ -25,16 +25,16 @@ export class SimulationService implements OnModuleInit, OnModuleDestroy {
   // Realistic Waypoints around Go Vap / IUH, HCMC
   private readonly WAYPOINTS: [number, number][] = [
     [10.82753, 106.67931], // Cổng ĐH Công Nghiệp TP.HCM (IUH) - 12 Nguyễn Văn Bảo
-    [10.82810, 106.68005], // Ngã 3 Nguyễn Văn Bảo - Nguyễn Thái Sơn
-    [10.82915, 106.68120], // Đường Nguyễn Thái Sơn
-    [10.83050, 106.68260], // Ngã 4 Nguyễn Thái Sơn - Phan Văn Trị
-    [10.83220, 106.68050], // Phan Văn Trị (hướng về Emart)
-    [10.83350, 106.67820], // Phan Văn Trị (gần Thống Nhất)
-    [10.83510, 106.67510], // Ngã 4 Phan Văn Trị - Quang Trung
-    [10.83380, 106.67380], // Đường Quang Trung
-    [10.83150, 106.67250], // Vòng xoay Ngã Sáu Gò Vấp
-    [10.82950, 106.67480], // Đường Nguyễn Oanh
-    [10.82820, 106.67720], // Rẽ vào Nguyễn Văn Bảo
+    [10.8281, 106.68005], // Ngã 3 Nguyễn Văn Bảo - Nguyễn Thái Sơn
+    [10.82915, 106.6812], // Đường Nguyễn Thái Sơn
+    [10.8305, 106.6826], // Ngã 4 Nguyễn Thái Sơn - Phan Văn Trị
+    [10.8322, 106.6805], // Phan Văn Trị (hướng về Emart)
+    [10.8335, 106.6782], // Phan Văn Trị (gần Thống Nhất)
+    [10.8351, 106.6751], // Ngã 4 Phan Văn Trị - Quang Trung
+    [10.8338, 106.6738], // Đường Quang Trung
+    [10.8315, 106.6725], // Vòng xoay Ngã Sáu Gò Vấp
+    [10.8295, 106.6748], // Đường Nguyễn Oanh
+    [10.8282, 106.6772], // Rẽ vào Nguyễn Văn Bảo
     [10.82753, 106.67931], // Hoàn tất vòng lặp
   ];
 
@@ -67,8 +67,10 @@ export class SimulationService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.logger.log(`Starting driver GPS simulation for ${this.DRIVER_NAME} (${this.DRIVER_ID})`);
-    this.tick();
-    this.intervalTimer = setInterval(() => this.tick(), intervalMs);
+    void this.tick();
+    this.intervalTimer = setInterval(() => {
+      void this.tick();
+    }, intervalMs);
 
     return { success: true, message: 'Driver GPS simulation started' };
   }
@@ -144,4 +146,3 @@ export class SimulationService implements OnModuleInit, OnModuleDestroy {
     return path;
   }
 }
-

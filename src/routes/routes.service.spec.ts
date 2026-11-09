@@ -117,7 +117,9 @@ describe('RoutesService', () => {
     mockQueryRunner = buildQueryRunnerMock();
     mockQueryRunner.manager.find = jest
       .fn()
-      .mockImplementation((entity, opts) => mockOrderRepo.find(opts));
+      .mockImplementation(
+        (_entity: unknown, opts: unknown) => mockOrderRepo.find(opts) as Promise<unknown>,
+      );
     mockDataSource.createQueryRunner.mockReturnValue(mockQueryRunner);
 
     const module: TestingModule = await Test.createTestingModule({
@@ -253,7 +255,7 @@ describe('RoutesService', () => {
         expect.objectContaining({
           driverId: 'driver-1',
           stopCount: 2,
-          message: expect.stringContaining('chuyến đi mới'),
+          message: expect.stringContaining('chuyến đi mới') as unknown,
         }),
       );
     });

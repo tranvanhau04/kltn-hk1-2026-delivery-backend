@@ -1,4 +1,11 @@
-import { Entity, Column, PrimaryColumn, OneToMany, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Entity,
+  Column,
+  PrimaryColumn,
+  OneToMany,
+  CreateDateColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 import { Depot } from './depot.entity';
 
 @Entity('regions')
@@ -24,4 +31,3 @@ export class Region {
   @OneToMany(() => Depot, (depot) => depot.region)
   hubs: Depot[];
 }
-

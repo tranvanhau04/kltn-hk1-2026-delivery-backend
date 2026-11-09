@@ -248,7 +248,10 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
     // Ensure driver entity is not marked OFFLINE when transmitting active GPS
     try {
       const driverRecord = await this.driverRepo.findOne({ where: { userId: driverId } });
-      if (driverRecord && driverRecord.currentShiftStatus === DriverShiftStatus.OFFLINE) {
+      if (
+        driverRecord &&
+        (driverRecord.currentShiftStatus as DriverShiftStatus) === DriverShiftStatus.OFFLINE
+      ) {
         driverRecord.currentShiftStatus = DriverShiftStatus.ONLINE_READY;
         await this.driverRepo.save(driverRecord);
         this.logger.log(`[WS] Driver ${driverId} marked ONLINE_READY upon GPS reception`);

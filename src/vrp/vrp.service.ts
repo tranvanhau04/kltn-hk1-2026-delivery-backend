@@ -545,7 +545,9 @@ function runBalancedKMeans(
       lockedClusterIndices.add(sourceIdx);
     }
 
-    if (!clusters.some((c, idx) => c.orders.length > targetStops && !lockedClusterIndices.has(idx))) {
+    if (
+      !clusters.some((c, idx) => c.orders.length > targetStops && !lockedClusterIndices.has(idx))
+    ) {
       break;
     }
   }
@@ -558,10 +560,7 @@ interface DriverAssignment {
   orders: VrpOrder[];
 }
 
-function matchClustersToDrivers(
-  clusters: VrpOrder[][],
-  drivers: VrpDriver[],
-): DriverAssignment[] {
+function matchClustersToDrivers(clusters: VrpOrder[][], drivers: VrpDriver[]): DriverAssignment[] {
   const assignments: DriverAssignment[] = [];
   const remainingDrivers = [...drivers];
 
@@ -668,7 +667,8 @@ export class VrpService {
 
     // Vehicle Capacity Constraints: Filter available drivers with positive max payload
     const availableDrivers = drivers.filter(
-      (d) => Number(d.maxWeightKg) > 0 && (Number(d.maxVolumeM3) >= 0 || isNaN(Number(d.maxVolumeM3))),
+      (d) =>
+        Number(d.maxWeightKg) > 0 && (Number(d.maxVolumeM3) >= 0 || isNaN(Number(d.maxVolumeM3))),
     );
 
     return { clusteredOrders, availableDrivers };
@@ -798,8 +798,18 @@ export class VrpService {
     const vanDrivers = availableDrivers.filter(isVanDriver);
     const motorbikeDrivers = availableDrivers.filter((d) => !isVanDriver(d));
 
-    console.log('Heavy orders count:', heavyOrders.length, 'vs Light orders count:', lightOrders.length);
-    console.log('Van drivers count:', vanDrivers.length, 'vs Motorbike drivers count:', motorbikeDrivers.length);
+    console.log(
+      'Heavy orders count:',
+      heavyOrders.length,
+      'vs Light orders count:',
+      lightOrders.length,
+    );
+    console.log(
+      'Van drivers count:',
+      vanDrivers.length,
+      'vs Motorbike drivers count:',
+      motorbikeDrivers.length,
+    );
 
     const depotCoords = { lat: Number(depot.latitude), lng: Number(depot.longitude) };
     let vanAssignments: DriverAssignment[] = [];
@@ -854,10 +864,7 @@ export class VrpService {
     const generatedClustersCount = vanAssignments.length + motorbikeAssignments.length;
     console.log('Generated clusters count:', generatedClustersCount);
 
-    const driverAssignments: DriverAssignment[] = [
-      ...vanAssignments,
-      ...motorbikeAssignments,
-    ];
+    const driverAssignments: DriverAssignment[] = [...vanAssignments, ...motorbikeAssignments];
 
     // Capacity enforcement & overflow redistribution
     for (let ai = 0; ai < driverAssignments.length; ai++) {
@@ -866,8 +873,8 @@ export class VrpService {
       const maxW = Number(driver.maxWeightKg);
       const maxV = Number(driver.maxVolumeM3);
 
-      let currentW = assignment.orders.reduce((s, o) => s + Number(o.weightKg), 0);
-      let currentV = assignment.orders.reduce((s, o) => s + Number(o.volumeM3), 0);
+      const currentW = assignment.orders.reduce((s, o) => s + Number(o.weightKg), 0);
+      const currentV = assignment.orders.reduce((s, o) => s + Number(o.volumeM3), 0);
 
       if (currentW > maxW + 0.001 || (maxV > 0 && currentV > maxV + 0.0001)) {
         const ordersToKeep: VrpOrder[] = [];
@@ -878,10 +885,7 @@ export class VrpService {
         for (const order of assignment.orders) {
           const w = Number(order.weightKg);
           const v = Number(order.volumeM3);
-          if (
-            runningW + w <= maxW + 0.001 &&
-            (maxV <= 0 || runningV + v <= maxV + 0.0001)
-          ) {
+          if (runningW + w <= maxW + 0.001 && (maxV <= 0 || runningV + v <= maxV + 0.0001)) {
             ordersToKeep.push(order);
             runningW += w;
             runningV += v;

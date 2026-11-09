@@ -39,10 +39,7 @@ export class OrdersController {
   /** GET /api/orders/pool — unassigned NEW orders for VRP */
   @Get('pool')
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
-  findPool(
-    @Query('hubId') hubId?: string,
-    @Query('regionId') regionId?: string,
-  ): Promise<Order[]> {
+  findPool(@Query('hubId') hubId?: string, @Query('regionId') regionId?: string): Promise<Order[]> {
     return this.ordersService.findPool(hubId, regionId);
   }
 

@@ -113,8 +113,8 @@ export class VrpController {
       dto.driverIds?.length
         ? { where: { userId: In(dto.driverIds) } }
         : depot?.id
-        ? { where: { depotId: depot.id } }
-        : {},
+          ? { where: { depotId: depot.id } }
+          : {},
     );
 
     // Filter drivers by active shift status and zone assignment
