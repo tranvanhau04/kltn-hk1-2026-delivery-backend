@@ -444,4 +444,132 @@ export class ReportsService {
 
     return workbook;
   }
+
+  /**
+   * Export all orders with driver and route info to Excel (.xlsx)
+   */
+  async generateOrdersExcelExport(
+    startDate?: string,
+    endDate?: string,
+    status?: string,
+  ): Promise<ExcelJS.Workbook> {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'SmartExpress Logistics';
+    workbook.created = new Date();
+
+    const sheet = workbook.addWorksheet('Danh sách Đơn hàng');
+
+    // Title Banner
+    sheet.mergeCells('A1:G1');
+    const title = sheet.getCell('A1');
+    title.value = 'SMARTEXPRESS LOGISTICS - BÁO CÁO DANH SÁCH ĐƠN HÀNG';
+    title.font = { size: 15, bold: true, color: { argb: 'FFFFFFFF' } };
+    title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
+    title.alignment = { vertical: 'middle', horizontal: 'center' };
+    sheet.getRow(1).height = 30;
+
+    sheet.mergeCells('A2:G2');
+    const subtitle = sheet.getCell('A2');
+    subtitle.value = `Thời gian xuất: ${new Date().toLocaleString('vi-VN')}`;
+    subtitle.font = { italic: true, size: 10, color: { argb: 'FF595959' } };
+    subtitle.alignment = { vertical: 'middle', horizontal: 'left' };
+    sheet.getRow(2).height = 20;
+
+    // Header row
+    const headerRow = sheet.getRow(4);
+    headerRow.values = [
+      'Mã Đơn',
+      'Trạng thái',
+      'Tiền Thu Hộ (COD)',
+      'Phí giao hàng',
+      'Người nhận',
+      'Địa chỉ',
+      'Tài xế',
+    ];
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F5597' } };
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+    headerRow.height = 25;
+
+    // Query orders with route and driver
+    const qb = this.orderRepo
+      .createQueryBuilder('order')
+      .leftJoin('stops', 'stop', 'stop.order_id = order.id')
+      .leftJoin('routes', 'route', 'route.id = stop.route_id')
+      .leftJoin('users', 'driver_user', 'driver_user.id = route.driver_id')
+      .addSelect('driver_user.full_name', 'driverName')
+      .addSelect('route.driver_id', 'driverId')
+      .orderBy('order.created_at', 'DESC');
+
+    if (startDate) {
+      qb.andWhere('order.created_at >= :startDate', {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        startDate: startOfDay(new Date(startDate)),
+      });
+    }
+    if (endDate) {
+      qb.andWhere('order.created_at <= :endDate', {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        endDate: endOfDay(new Date(endDate)),
+      });
+    }
+    if (status && status !== 'ALL') {
+      qb.andWhere('order.status = :status', { status });
+    }
+
+    const { entities: orders, raw } = await qb.getRawAndEntities<{
+      driverName?: string;
+      driver_user_full_name?: string;
+    }>();
+
+    const STATUS_MAP: Record<string, string> = {
+      NEW: 'Chờ phân công',
+      ASSIGNED: 'Đã phân công',
+      IN_TRANSIT: 'Đang giao hàng',
+      DELIVERED: 'Giao thành công',
+      FAILED: 'Giao thất bại',
+      RESCHEDULED: 'Hẹn giao lại',
+      CANCELLED: 'Đã hủy',
+    };
+
+    orders.forEach((o, index) => {
+      const rawItem = raw[index];
+      const driverName = rawItem?.driverName || rawItem?.driver_user_full_name || 'Chưa phân công';
+      const weight = Number(o.weightKg || 1);
+      const deliveryFee = Math.round(20000 + Math.max(0, weight - 1) * 5000);
+
+      const row = sheet.addRow([
+        o.code || o.id,
+        STATUS_MAP[o.status] || o.status,
+        Number(o.codAmount || 0),
+        deliveryFee,
+        `${o.receiverName} (${o.receiverPhone})`,
+        o.deliveryAddress,
+        driverName,
+      ]);
+
+      // Formatting
+      row.getCell(3).numFmt = '#,##0 "₫"';
+      row.getCell(4).numFmt = '#,##0 "₫"';
+      row.getCell(1).alignment = { horizontal: 'center' };
+      row.getCell(2).alignment = { horizontal: 'center' };
+      row.getCell(3).alignment = { horizontal: 'right' };
+      row.getCell(4).alignment = { horizontal: 'right' };
+      row.getCell(5).alignment = { horizontal: 'left' };
+      row.getCell(6).alignment = { horizontal: 'left' };
+      row.getCell(7).alignment = { horizontal: 'left' };
+    });
+
+    sheet.columns = [
+      { width: 20 },
+      { width: 18 },
+      { width: 22 },
+      { width: 18 },
+      { width: 30 },
+      { width: 45 },
+      { width: 25 },
+    ];
+
+    return workbook;
+  }
 }

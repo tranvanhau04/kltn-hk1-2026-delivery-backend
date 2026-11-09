@@ -1,5 +1,6 @@
-import { Controller, Get, Patch, Param, Body, Query, Res } from '@nestjs/common';
+import { Controller, Get, Patch, Param, Body, Query, Res, UseInterceptors } from '@nestjs/common';
 import type { Response } from 'express';
+import { CacheInterceptor, CacheKey, CacheTTL } from '@nestjs/cache-manager';
 import { ReportsService } from './reports.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../entities/user.entity';
@@ -17,6 +18,9 @@ export class ReportsController {
    */
   @Get('dashboard')
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  @UseInterceptors(CacheInterceptor)
+  @CacheKey('dashboard_stats')
+  @CacheTTL(60000)
   async getDashboard() {
     return this.reportsService.getDashboardStats();
   }
@@ -76,6 +80,36 @@ export class ReportsController {
     const workbook = await this.reportsService.generateExcelExport(startDate, endDate, driverId);
 
     const filename = `Bao-cao-doi-soat-SmartExpress-${new Date().toISOString().split('T')[0]}.xlsx`;
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  }
+
+  /**
+   * GET /api/reports/export/orders
+   * Export Orders to Excel (.xlsx)
+   */
+  @Get('export/orders')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  async exportOrdersExcel(
+    @Res() res: Response,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('status') status?: string,
+  ) {
+    const workbook = await this.reportsService.generateOrdersExcelExport(
+      startDate,
+      endDate,
+      status,
+    );
+
+    const filename = `orders_export.xlsx`;
 
     res.setHeader(
       'Content-Type',

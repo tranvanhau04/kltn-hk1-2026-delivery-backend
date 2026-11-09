@@ -192,13 +192,13 @@ async function fetchDriversFromDb(config) {
     console.warn(`${YELLOW}⚠ Không thể kết nối trực tiếp MySQL (${err.message}). Sử dụng danh sách dự phòng.${RESET}`);
     const fallbacks = [
       { id: '2b093939-87b8-47b8-80e3-71ca1884fc12', full_name: 'Văn Hậu Trần', email: 'vanhautran592@gmail.com', role: 'DRIVER', license_plate: '59Y3-123.68', vehicle_type: 'MOTORBIKE' },
-      { id: 'u0000000-0000-0000-0000-000000000103', full_name: 'Vũ Quốc Bảo (Xe tải Van 500kg)', email: 'driver03@smartexpress.vn', role: 'DRIVER', license_plate: '51D-890.12', vehicle_type: 'VAN_500KG' },
-      { id: 'u0000000-0000-0000-0000-000000000108', full_name: 'Trương Gia Huy (Xe máy 05)', email: 'driver08@smartexpress.vn', role: 'DRIVER', license_plate: '59M2-778.89', vehicle_type: 'MOTORBIKE' },
-      { id: 'u0000000-0000-0000-0000-000000000101', full_name: 'Ngô Văn Tài (Xe máy 01)', email: 'driver01@smartexpress.vn', role: 'DRIVER', license_plate: '59G1-234.56', vehicle_type: 'MOTORBIKE' },
-      { id: 'u0000000-0000-0000-0000-000000000102', full_name: 'Phạm Hoàng Nam (Xe máy 02)', email: 'driver02@smartexpress.vn', role: 'DRIVER', license_plate: '59P1-345.67', vehicle_type: 'MOTORBIKE' },
-      { id: 'u0000000-0000-0000-0000-000000000104', full_name: 'Đặng Minh Khôi (Xe tải 1 Tấn)', email: 'driver04@smartexpress.vn', role: 'DRIVER', license_plate: '51C-901.23', vehicle_type: 'TRUCK_1000KG' },
-      { id: 'u0000000-0000-0000-0000-000000000105', full_name: 'Bùi Anh Tuấn (Xe máy 03)', email: 'driver05@smartexpress.vn', role: 'DRIVER', license_plate: '59S3-112.23', vehicle_type: 'MOTORBIKE' },
-      { id: 'u0000000-0000-0000-0000-000000000106', full_name: 'Đỗ Thành Đạt (Xe máy 04)', email: 'driver06@smartexpress.vn', role: 'DRIVER', license_plate: '59V1-445.56', vehicle_type: 'MOTORBIKE' },
+      { id: 'u0000000-0000-0000-0000-000000000103', full_name: 'Vũ Quốc Bảo', email: 'driver03@smartexpress.vn', role: 'DRIVER', license_plate: '51D-890.12', vehicle_type: 'VAN_500KG' },
+      { id: 'u0000000-0000-0000-0000-000000000108', full_name: 'Trương Gia Huy', email: 'driver08@smartexpress.vn', role: 'DRIVER', license_plate: '59M2-778.89', vehicle_type: 'MOTORBIKE' },
+      { id: 'u0000000-0000-0000-0000-000000000101', full_name: 'Ngô Văn Tài', email: 'driver01@smartexpress.vn', role: 'DRIVER', license_plate: '59G1-234.56', vehicle_type: 'MOTORBIKE' },
+      { id: 'u0000000-0000-0000-0000-000000000102', full_name: 'Phạm Hoàng Nam', email: 'driver02@smartexpress.vn', role: 'DRIVER', license_plate: '59P1-345.67', vehicle_type: 'MOTORBIKE' },
+      { id: 'u0000000-0000-0000-0000-000000000104', full_name: 'Đặng Minh Khôi', email: 'driver04@smartexpress.vn', role: 'DRIVER', license_plate: '51C-901.23', vehicle_type: 'TRUCK_1000KG' },
+      { id: 'u0000000-0000-0000-0000-000000000105', full_name: 'Bùi Anh Tuấn', email: 'driver05@smartexpress.vn', role: 'DRIVER', license_plate: '59S3-112.23', vehicle_type: 'MOTORBIKE' },
+      { id: 'u0000000-0000-0000-0000-000000000106', full_name: 'Đỗ Thành Đạt', email: 'driver06@smartexpress.vn', role: 'DRIVER', license_plate: '59V1-445.56', vehicle_type: 'MOTORBIKE' },
     ];
 
     if (config.mode === 'ALL') {

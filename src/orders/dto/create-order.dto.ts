@@ -6,6 +6,18 @@ export class CreateOrderDto {
   receiverName: string;
 
   @IsString()
+  @IsOptional()
+  senderName?: string;
+
+  @IsString()
+  @IsOptional()
+  senderPhone?: string;
+
+  @IsNumber()
+  @IsOptional()
+  deliveryFee?: number;
+
+  @IsString()
   @IsNotEmpty()
   receiverPhone: string;
 

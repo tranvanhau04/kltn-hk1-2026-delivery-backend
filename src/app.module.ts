@@ -18,7 +18,9 @@ import { ShiftsModule } from './shifts/shifts.module';
 import { StopsModule } from './stops/stops.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { CacheModule } from '@nestjs/cache-manager';
+import { redisStore } from 'cache-manager-redis-yet';
 import { ReportsModule } from './reports/reports.module';
 
 @Module({
@@ -28,16 +30,25 @@ import { ReportsModule } from './reports/reports.module';
     }),
     ThrottlerModule.forRoot([
       {
-        name: 'default',
         ttl: 60000,
-        limit: 20,
-      },
-      {
-        name: 'ws',
-        ttl: 60000,
-        limit: 20,
+        limit: 100,
       },
     ]),
+    CacheModule.registerAsync({
+      isGlobal: true,
+      useFactory: async () => {
+        const store = await redisStore({
+          socket: {
+            host: process.env.REDIS_HOST || 'localhost',
+            port: parseInt(process.env.REDIS_PORT || '6379', 10),
+          },
+          ttl: 60 * 1000,
+        });
+        return {
+          store: () => store,
+        };
+      },
+    }),
     AuthModule,
     UsersModule,
     DatabaseModule,
@@ -56,6 +67,10 @@ import { ReportsModule } from './reports/reports.module';
   controllers: [AppController],
   providers: [
     AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,

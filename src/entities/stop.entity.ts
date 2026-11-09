@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, Column, PrimaryColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { Order } from './order.entity';
 
 @Entity('stops')
@@ -6,6 +6,7 @@ export class Stop {
   @PrimaryColumn({ type: 'varchar', length: 36 })
   id: string;
 
+  @Index()
   @Column({ name: 'route_id', type: 'varchar', length: 36 })
   routeId: string;
 

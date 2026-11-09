@@ -5,6 +5,7 @@ import {
   ManyToOne,
   JoinColumn,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 import { Shift } from './shift.entity';
 import { User } from './user.entity';
@@ -23,6 +24,7 @@ export class TrackingLog {
   id: string;
 
   /** FK → drivers(user_id) */
+  @Index()
   @Column({ name: 'driver_id', type: 'varchar', length: 36 })
   driverId: string;
 
@@ -45,6 +47,7 @@ export class TrackingLog {
   timestamp: Date;
 
   /** Canonical created_at — used by Socket.io gateway */
+  @Index()
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

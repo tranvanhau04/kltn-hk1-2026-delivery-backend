@@ -19,11 +19,11 @@ import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
   imports: [
     TypeOrmModule.forRoot({
       type: 'mysql',
-      host: '127.0.0.1',
-      port: 3308,
-      username: 'root',
-      password: 'sapassword',
-      database: 'delivery_db',
+      host: process.env.DB_HOST || '127.0.0.1',
+      port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3308,
+      username: process.env.DB_USER || 'root',
+      password: process.env.DB_PASSWORD || 'sapassword',
+      database: process.env.DB_NAME || 'delivery_db',
       entities: [
         Region,
         Depot,

@@ -165,7 +165,7 @@ export class OrdersService {
       .innerJoin('routes', 'route', 'route.id = stop.route_id')
       .where('route.driver_id = :driverId', { driverId })
       .andWhere('route.status IN (:...routeStatuses)', {
-        routeStatuses: ['PLANNED', 'IN_PROGRESS'],
+        routeStatuses: ['ASSIGNED', 'PLANNED', 'IN_PROGRESS', 'CONFIRMED'],
       })
       .orderBy('stop.sequence_no', 'ASC')
       .getMany();
@@ -182,6 +182,10 @@ export class OrdersService {
     order.weightKg = dto.weightKg ?? 0;
     order.volumeM3 = dto.volumeM3 ?? 0;
     order.codAmount = dto.codAmount ?? 0;
+    order.senderName = dto.senderName ?? null;
+    order.senderPhone = dto.senderPhone ?? null;
+    order.deliveryFee = dto.deliveryFee ?? 25000;
+    order.notes = dto.notes ?? null;
     order.zoneId = dto.zoneId ?? null;
     order.depotId = dto.depotId ?? null;
     order.status = OrderStatus.NEW;

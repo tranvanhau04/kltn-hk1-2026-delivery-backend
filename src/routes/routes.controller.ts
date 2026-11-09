@@ -86,6 +86,33 @@ export class RoutesController {
   }
 
   /**
+   * GET /routes/active
+   * Get active route for the currently authenticated driver.
+   */
+  @Get('active')
+  async getActiveRoute(@CurrentUser() user: JwtPayload) {
+    return this.routesService.getActiveRouteForDriver(user?.sub);
+  }
+
+  /**
+   * GET /routes/today
+   * Alias of /routes/active.
+   */
+  @Get('today')
+  async getTodayRoute(@CurrentUser() user: JwtPayload) {
+    return this.routesService.getActiveRouteForDriver(user?.sub);
+  }
+
+  /**
+   * GET /routes/driver/:driverId
+   * Get active route for a specific driver by driverId.
+   */
+  @Get('driver/:driverId')
+  async getDriverRoute(@Param('driverId') driverId: string) {
+    return this.routesService.getActiveRouteForDriver(driverId);
+  }
+
+  /**
    * GET /routes/:id
    * Full route detail: stops in sequence order (1→N), driver profile,
    * depot info, and parsed polyline coordinates.
