@@ -121,6 +121,7 @@ CREATE TABLE `shifts` (
     `cod_submitted` DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
     `reconciled_by` VARCHAR(36)    NULL     DEFAULT NULL COMMENT 'dispatcher_id thực hiện đối soát, nullable',
     `reconciled_at` TIMESTAMP      NULL     DEFAULT NULL COMMENT 'thời điểm đối soát hoàn tất, nullable',
+    INDEX `idx_shifts_driver_status` (`driver_id`, `status`),
     CONSTRAINT `fk_shift_driver`        FOREIGN KEY (`driver_id`)     REFERENCES `drivers` (`user_id`) ON DELETE RESTRICT,
     CONSTRAINT `fk_shift_reconciled`    FOREIGN KEY (`reconciled_by`) REFERENCES `users`   (`id`)      ON DELETE SET NULL,
     CONSTRAINT `chk_shift_status`       CHECK (`status` IN ('OPEN', 'CLOSED')),

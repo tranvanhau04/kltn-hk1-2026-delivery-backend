@@ -21,6 +21,7 @@ import { UserRole } from '../entities/user.entity';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { SubmitPodDto } from './dto/submit-pod.dto';
 import { FailStopDto } from './dto/fail-stop.dto';
+import { validateImageMagicBytes } from './utils/validate-image-magic';
 
 @Injectable()
 export class StopsService {
@@ -132,6 +133,15 @@ export class StopsService {
       throw new BadRequestException('Vui lòng tải lên ảnh chụp kiện hàng (field "file")');
     }
 
+    // 1b. Validate Magic Bytes — chặn file giả mạo extension
+    const isRealImage = await validateImageMagicBytes(file.path);
+    if (!isRealImage) {
+      await this.safeDeleteFile(file.path);
+      throw new BadRequestException(
+        'File tải lên không phải ảnh thật. Chỉ chấp nhận ảnh JPEG, PNG, WebP (kiểm tra nội dung file).',
+      );
+    }
+
     // 2. Fetch stop & relations
     const stop = await this.stopRepo.findOne({
       where: { id: stopId },
@@ -237,17 +247,26 @@ export class StopsService {
       });
       await queryRunner.manager.save(history);
 
-      // 5.5. Accumulate COD in active driver shift
+      // 5.5. Accumulate COD in active driver shift — PESSIMISTIC LOCK
+      // Index: idx_shifts_driver_status (driver_id, status) → SELECT ... FOR UPDATE khóa chính xác 1 row
       let shiftCodTotal = 0;
       const activeShift = await queryRunner.manager.findOne(Shift, {
         where: { driverId: route.driverId, status: ShiftStatus.OPEN },
         order: { startTime: 'DESC' },
+        lock: { mode: 'pessimistic_write' },
       });
 
       if (activeShift) {
         if (finalCod > 0) {
+          // Atomic increment — giảm thời gian giữ lock xuống tối thiểu
+          await queryRunner.manager.increment(
+            Shift,
+            { id: activeShift.id },
+            'codCollected',
+            finalCod,
+          );
+          // Refresh giá trị mới nhất sau increment
           activeShift.codCollected = Number(activeShift.codCollected || 0) + finalCod;
-          await queryRunner.manager.save(activeShift);
         }
         shiftCodTotal = Number(activeShift.codCollected);
       }
@@ -297,6 +316,17 @@ export class StopsService {
     file: Express.Multer.File | undefined,
     user: JwtPayload,
   ) {
+    // 0. Validate magic bytes if optional file is uploaded
+    if (file) {
+      const isRealImage = await validateImageMagicBytes(file.path);
+      if (!isRealImage) {
+        await this.safeDeleteFile(file.path);
+        throw new BadRequestException(
+          'File tải lên không phải ảnh thật. Chỉ chấp nhận ảnh JPEG, PNG, WebP (kiểm tra nội dung file).',
+        );
+      }
+    }
+
     // 1. Business validations for action vs rescheduledDate
     if (dto.action === 'RESCHEDULED') {
       if (!dto.rescheduledDate) {

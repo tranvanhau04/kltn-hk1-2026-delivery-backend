@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Repository, DataSource } from 'typeorm';
 import { Shift, ShiftStatus } from '../entities/shift.entity';
 import { Driver, DriverShiftStatus } from '../entities/driver.entity';
 import { Route } from '../entities/route.entity';
@@ -42,6 +42,8 @@ export class ShiftsService {
 
     @InjectRepository(Depot)
     private readonly depotRepo: Repository<Depot>,
+
+    private readonly dataSource: DataSource,
   ) {}
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -144,79 +146,85 @@ export class ShiftsService {
   async closeShiftById(shiftId: string, dto: CloseShiftDto, user: JwtPayload) {
     const driver = await this.resolveDriver(user);
 
-    // 1. Tìm ca làm việc theo ID
-    const shift = await this.shiftRepo.findOne({ where: { id: shiftId } });
-
-    if (!shift) {
-      throw new NotFoundException(`Không tìm thấy ca làm việc với id=${shiftId}`);
-    }
-
-    // 2. Xác thực quyền sở hữu
-    if (shift.driverId !== driver.userId) {
-      throw new ForbiddenException('Bạn không có quyền đóng ca làm việc này');
-    }
-
-    // 3. Kiểm tra trạng thái OPEN
-    if (shift.status !== ShiftStatus.OPEN) {
-      throw new BadRequestException(
-        `Ca làm việc đang ở trạng thái ${shift.status}, chỉ có thể đóng ca đang OPEN`,
-      );
-    }
-
-    // 4. Kiểm tra stops còn pending (cảnh báo nhưng vẫn cho đóng ca)
-    let pendingStopsCount = 0;
-    const activeRoute = await this.routeRepo
-      .createQueryBuilder('route')
-      .where('route.driver_id = :driverId', { driverId: driver.userId })
-      .andWhere('route.status IN (:...statuses)', {
-        statuses: ['ASSIGNED', 'IN_PROGRESS', 'CONFIRMED', 'PLANNED'],
-      })
-      .orderBy('route.created_at', 'DESC')
-      .getOne();
-
-    if (activeRoute) {
-      pendingStopsCount = await this.stopRepo.count({
-        where: { routeId: activeRoute.id, status: In(['PENDING', 'ARRIVED']) },
+    return this.dataSource.transaction(async (manager) => {
+      // 1. Tìm ca làm việc theo ID với pessimistic write lock để tránh race conditions
+      const shift = await manager.findOne(Shift, {
+        where: { id: shiftId },
+        lock: { mode: 'pessimistic_write' },
       });
-    }
 
-    // 5. Cập nhật shift
-    shift.status = ShiftStatus.PENDING_SETTLEMENT;
-    shift.endTime = new Date();
-    shift.codSubmitted = dto.codSubmitted;
-    if (dto.latitude !== undefined) shift.currentLatitude = dto.latitude;
-    if (dto.longitude !== undefined) shift.currentLongitude = dto.longitude;
+      if (!shift) {
+        throw new NotFoundException(`Không tìm thấy ca làm việc với id=${shiftId}`);
+      }
 
-    const saved = await this.shiftRepo.save(shift);
+      // 2. Xác thực quyền sở hữu
+      if (shift.driverId !== driver.userId) {
+        throw new ForbiddenException('Bạn không có quyền đóng ca làm việc này');
+      }
 
-    // 6. Chuyển trạng thái tài xế sang OFFLINE
-    await this.driverRepo.update(
-      { userId: driver.userId },
-      { currentShiftStatus: DriverShiftStatus.OFFLINE },
-    );
+      // 3. Kiểm tra trạng thái OPEN
+      if (shift.status !== ShiftStatus.OPEN) {
+        throw new BadRequestException(
+          `Ca làm việc đang ở trạng thái ${shift.status}, chỉ có thể đóng ca đang OPEN`,
+        );
+      }
 
-    // 7. Tính chênh lệch COD
-    const codCollected = Number(shift.codCollected) || 0;
-    const codSubmitted = Number(dto.codSubmitted) || 0;
-    const codDifference = codCollected - codSubmitted;
+      // 4. Kiểm tra stops còn pending (cảnh báo nhưng vẫn cho đóng ca)
+      let pendingStopsCount = 0;
+      const activeRoute = await this.routeRepo
+        .createQueryBuilder('route')
+        .where('route.driver_id = :driverId', { driverId: driver.userId })
+        .andWhere('route.status IN (:...statuses)', {
+          statuses: ['ASSIGNED', 'IN_PROGRESS', 'CONFIRMED', 'PLANNED'],
+        })
+        .orderBy('route.created_at', 'DESC')
+        .getOne();
 
-    this.logger.log(
-      `Driver ${driver.userId} closed shift ${saved.id} → PENDING_SETTLEMENT ` +
-        `(collected=${codCollected}, submitted=${codSubmitted}, diff=${codDifference})`,
-    );
+      if (activeRoute) {
+        pendingStopsCount = await this.stopRepo.count({
+          where: { routeId: activeRoute.id, status: In(['PENDING', 'ARRIVED']) },
+        });
+      }
 
-    return {
-      success: true,
-      message: 'Đã đóng ca thành công. Chờ thủ quỹ đối soát.',
-      shift: this.formatShift(saved),
-      summary: {
-        codCollected,
-        codSubmitted,
-        codDifference,
-        pendingStopsWarning:
-          pendingStopsCount > 0 ? `Còn ${pendingStopsCount} điểm dừng chưa hoàn thành` : null,
-      },
-    };
+      // 5. Cập nhật shift
+      shift.status = ShiftStatus.PENDING_SETTLEMENT;
+      shift.endTime = new Date();
+      shift.codSubmitted = dto.codSubmitted;
+      if (dto.latitude !== undefined) shift.currentLatitude = dto.latitude;
+      if (dto.longitude !== undefined) shift.currentLongitude = dto.longitude;
+
+      const saved = await manager.save(Shift, shift);
+
+      // 6. Chuyển trạng thái tài xế sang OFFLINE
+      await manager.update(
+        Driver,
+        { userId: driver.userId },
+        { currentShiftStatus: DriverShiftStatus.OFFLINE },
+      );
+
+      // 7. Tính chênh lệch COD
+      const codCollected = Number(shift.codCollected) || 0;
+      const codSubmitted = Number(dto.codSubmitted) || 0;
+      const codDifference = codCollected - codSubmitted;
+
+      this.logger.log(
+        `Driver ${driver.userId} closed shift ${saved.id} → PENDING_SETTLEMENT ` +
+          `(collected=${codCollected}, submitted=${codSubmitted}, diff=${codDifference})`,
+      );
+
+      return {
+        success: true,
+        message: 'Đã đóng ca thành công. Chờ thủ quỹ đối soát.',
+        shift: this.formatShift(saved),
+        summary: {
+          codCollected,
+          codSubmitted,
+          codDifference,
+          pendingStopsWarning:
+            pendingStopsCount > 0 ? `Còn ${pendingStopsCount} điểm dừng chưa hoàn thành` : null,
+        },
+      };
+    });
   }
 
   /**

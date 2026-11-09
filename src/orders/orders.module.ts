@@ -5,12 +5,14 @@ import { OrdersService } from './orders.service';
 import { Order } from '../entities/order.entity';
 import { Depot } from '../entities/depot.entity';
 import { OrderStatusHistory } from '../entities/order-status-history.entity';
+import { Stop } from '../entities/stop.entity';
+import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
 import { GeocodingService } from '../geocoding/geocoding.service';
 import { TrackingModule } from '../tracking/tracking.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, Depot, OrderStatusHistory]),
+    TypeOrmModule.forFeature([Order, Depot, OrderStatusHistory, Stop, ProofOfDelivery]),
     TrackingModule,
   ],
   controllers: [OrdersController],
