@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, Brackets } from 'typeorm';
 import * as xlsx from 'xlsx';
@@ -14,6 +20,10 @@ import { TrackingGateway } from '../tracking/tracking.gateway';
 import { UpdateCoordinatesDto } from './dto/update-coordinates.dto';
 import { QueryOrderDto } from './dto/query-order.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { UpdateOrderDto } from './dto/update-order.dto';
+import { UserRole } from '../entities/user.entity';
+import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { S3Service } from '../s3/s3.service';
 
 /** Default Hub coordinates (IUH campus, Gò Vấp) used as geocoding fallback */
 const DEFAULT_DEPOT_LAT = 10.8468;
@@ -46,6 +56,7 @@ export class OrdersService {
     private readonly podRepo: Repository<ProofOfDelivery>,
     private readonly geocodingService: GeocodingService,
     private readonly dataSource: DataSource,
+    private readonly s3Service: S3Service,
     @Optional()
     private readonly trackingGateway?: TrackingGateway,
   ) {}
@@ -129,6 +140,33 @@ export class OrdersService {
 
     qb.orderBy('order.createdAt', 'DESC');
     return qb.getMany();
+  }
+
+  /** Returns order counts grouped by status */
+  async getStatusCounts(hubId?: string, regionId?: string): Promise<Record<string, number>> {
+    const qb = this.orderRepo
+      .createQueryBuilder('order')
+      .leftJoin('order.depot', 'depot')
+      .select('order.status', 'status')
+      .addSelect('COUNT(order.id)', 'count');
+
+    if (hubId) {
+      qb.andWhere('order.depot_id = :hubId', { hubId });
+    } else if (regionId) {
+      qb.andWhere('depot.region_id = :regionId', { regionId });
+    }
+
+    qb.groupBy('order.status');
+    const raw = await qb.getRawMany<{ status: string; count: string | number }>();
+    const counts: Record<string, number> = {};
+    let total = 0;
+    for (const item of raw) {
+      const cnt = Number(item.count) || 0;
+      counts[item.status] = cnt;
+      total += cnt;
+    }
+    counts['ALL'] = total;
+    return counts;
   }
 
   /** Returns a single order by ID */
@@ -242,6 +280,36 @@ export class OrdersService {
     order.longitude = dto.longitude;
     order.updatedAt = new Date();
 
+    return this.orderRepo.save(order);
+  }
+
+  /**
+   * Updates general order details (receiver, address, COD, weight, notes).
+   * Forbidden if the order is already DELIVERED or CANCELLED.
+   */
+  async update(id: string, dto: UpdateOrderDto): Promise<Order> {
+    const order = await this.findById(id);
+
+    if (order.status === OrderStatus.DELIVERED || (order.status as string) === 'CANCELLED') {
+      throw new BadRequestException(`Không thể chỉnh sửa đơn hàng ở trạng thái ${order.status}.`);
+    }
+
+    if (dto.receiverName !== undefined) order.receiverName = dto.receiverName;
+    if (dto.receiverPhone !== undefined) order.receiverPhone = dto.receiverPhone;
+    if (dto.deliveryAddress !== undefined) order.deliveryAddress = dto.deliveryAddress;
+    if (dto.latitude !== undefined) order.latitude = dto.latitude;
+    if (dto.longitude !== undefined) order.longitude = dto.longitude;
+    if (dto.weightKg !== undefined) order.weightKg = dto.weightKg;
+    if (dto.volumeM3 !== undefined) order.volumeM3 = dto.volumeM3;
+    if (dto.codAmount !== undefined) order.codAmount = dto.codAmount;
+    if (dto.deliveryFee !== undefined) order.deliveryFee = dto.deliveryFee;
+    if (dto.senderName !== undefined) order.senderName = dto.senderName;
+    if (dto.senderPhone !== undefined) order.senderPhone = dto.senderPhone;
+    if (dto.notes !== undefined) order.notes = dto.notes;
+    if (dto.zoneId !== undefined) order.zoneId = dto.zoneId;
+    if (dto.depotId !== undefined) order.depotId = dto.depotId;
+
+    order.updatedAt = new Date();
     return this.orderRepo.save(order);
   }
 
@@ -494,12 +562,28 @@ export class OrdersService {
   }
 
   /**
-   * Fetch proof of delivery (POD) for an order
+   * 2.2: Fetch proof of delivery (POD) for an order với kiểm tra phân quyền (RBAC)
+   * - Admin / Dispatcher: Toàn quyền xem
+   * - Driver: Chỉ xem được đơn thuộc lộ trình được phân công cho mình
+   * - Trả về Presigned URL có thời hạn
    */
-  async getOrderPod(orderId: string) {
-    const stop = await this.stopRepo.findOne({ where: { orderId } });
+  async getOrderPod(orderId: string, user: JwtPayload) {
+    const stop = await this.stopRepo.findOne({
+      where: { orderId },
+    });
+
     if (!stop) {
       return { hasPod: false };
+    }
+
+    // Role check: Driver chỉ được xem ảnh thuộc lộ trình của chính mình
+    if (user.role === UserRole.DRIVER) {
+      const route = await this.dataSource
+        .getRepository(Route)
+        .findOne({ where: { id: stop.routeId } });
+      if (!route || route.driverId !== user.sub) {
+        throw new ForbiddenException('Bạn không có quyền xem minh chứng giao hàng của đơn này.');
+      }
     }
 
     const pod = await this.podRepo.findOne({
@@ -511,9 +595,12 @@ export class OrdersService {
       return { hasPod: false };
     }
 
+    // Sinh Presigned URL từ S3 Object Key
+    const presignedUrl = await this.s3Service.getPresignedUrl(pod.photoUrl);
+
     return {
       hasPod: true,
-      photoUrl: pod.photoUrl,
+      photoUrl: presignedUrl,
       codCollected: pod.codCollected ? Number(pod.codCollected) : 0,
       failureReason: pod.failureReason,
       confirmedAt: pod.confirmedAt,

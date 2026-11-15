@@ -3,4 +3,7 @@ dist/
 .env
 uploads/*
 !uploads/pod/.gitkeep
+logs/
+migrate-schema.js
+seed-driver01.js
 

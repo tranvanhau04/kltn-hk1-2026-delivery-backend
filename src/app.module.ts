@@ -16,6 +16,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ShiftsModule } from './shifts/shifts.module';
 import { StopsModule } from './stops/stops.module';
+import { S3Module } from './s3/s3.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
@@ -63,6 +64,7 @@ import { ReportsModule } from './reports/reports.module';
     ShiftsModule,
     ReportsModule,
     StopsModule,
+    S3Module,
   ],
   controllers: [AppController],
   providers: [
