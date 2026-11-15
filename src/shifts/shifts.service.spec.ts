@@ -108,6 +108,7 @@ describe('ShiftsService', () => {
     create: jest.fn(),
     save: jest.fn(),
     find: jest.fn(),
+    findAndCount: jest.fn(),
   };
 
   const mockDriverRepo = {
@@ -143,6 +144,9 @@ describe('ShiftsService', () => {
   const mockDataSource = {
     transaction: jest.fn(async (cb: (manager: typeof mockEntityManager) => Promise<unknown>) => {
       return cb(mockEntityManager);
+    }),
+    getRepository: jest.fn().mockReturnValue({
+      find: jest.fn().mockResolvedValue([]),
     }),
   };
 
@@ -518,6 +522,54 @@ describe('ShiftsService', () => {
       expect(result.deliveredOrdersCount).toBe(2);
       expect(result.failedOrdersCount).toBe(1);
       expect(result.pendingCodAmount).toBe(200000); // 2 × 100000
+    });
+  });
+
+  // ─── getShiftHistory() (Task KLTN-130) ────────────────────────────────────────
+
+  describe('getShiftHistory()', () => {
+    it('should throw NotFoundException when driver profile does not exist', async () => {
+      mockDriverRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.getShiftHistory(makeDriverJwt())).rejects.toThrow(NotFoundException);
+    });
+
+    it('should return paginated shift items with correct calculations', async () => {
+      mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
+      const mockShifts = [
+        makeMockShift({
+          id: 'shift-1',
+          codCollected: 500000,
+          codSubmitted: 450000,
+          status: ShiftStatus.PENDING_SETTLEMENT,
+        }),
+        makeMockShift({
+          id: 'shift-2',
+          codCollected: 300000,
+          codSubmitted: 300000,
+          status: ShiftStatus.CLOSED,
+          reconciledBy: 'admin-uuid-1',
+          reconciledAt: new Date(),
+        }),
+      ];
+      mockShiftRepo.findAndCount.mockResolvedValue([mockShifts, 2]);
+
+      mockDataSource.getRepository.mockReturnValue({
+        find: jest
+          .fn()
+          .mockResolvedValue([{ id: 'admin-uuid-1', fullName: 'Thủ quỹ Nguyễn Văn A' }]),
+      });
+
+      const result = await service.getShiftHistory(makeDriverJwt(), 1, 10);
+
+      expect(result.success).toBe(true);
+      expect(result.total).toBe(2);
+      expect(result.items).toHaveLength(2);
+      expect(result.items[0].codDifference).toBe(50000); // 500k - 450k (thiếu 50k)
+      expect(result.items[0].status).toBe(ShiftStatus.PENDING_SETTLEMENT);
+      expect(result.items[1].codDifference).toBe(0); // 300k - 300k (khớp 100%)
+      expect(result.items[1].status).toBe(ShiftStatus.CLOSED);
+      expect(result.items[1].reconciledByName).toBe('Thủ quỹ Nguyễn Văn A');
     });
   });
 });

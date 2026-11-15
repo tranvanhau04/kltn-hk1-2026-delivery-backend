@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
 import { ShiftsService } from './shifts.service';
 import { OpenShiftDto } from './dto/open-shift.dto';
 import { CloseShiftDto } from './dto/close-shift.dto';
@@ -114,5 +114,41 @@ export class ShiftsController {
   @Roles(UserRole.DRIVER)
   getShiftSummary(@CurrentUser() user: JwtPayload) {
     return this.shiftsService.getShiftSummary(user);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Shift history & reconciliation tracking (Task KLTN-130)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * GET /driver/shifts/history
+   * Returns paginated shift history for the authenticated driver.
+   * Includes COD collections, submissions, discrepancy and settlement status.
+   */
+  @Get('driver/shifts/history')
+  @Roles(UserRole.DRIVER)
+  getShiftHistory(
+    @CurrentUser() user: JwtPayload,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = Math.max(1, parseInt(page || '1', 10) || 1);
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit || '20', 10) || 20));
+    return this.shiftsService.getShiftHistory(user, pageNum, limitNum);
+  }
+
+  /**
+   * GET /shifts/history (alias)
+   */
+  @Get('shifts/history')
+  @Roles(UserRole.DRIVER)
+  getShiftHistoryAlias(
+    @CurrentUser() user: JwtPayload,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = Math.max(1, parseInt(page || '1', 10) || 1);
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit || '20', 10) || 20));
+    return this.shiftsService.getShiftHistory(user, pageNum, limitNum);
   }
 }
