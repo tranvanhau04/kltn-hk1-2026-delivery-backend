@@ -14,9 +14,12 @@ import { OrdersService } from './orders.service';
 import { UpdateCoordinatesDto } from './dto/update-coordinates.dto';
 import { QueryOrderDto } from './dto/query-order.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { UpdateOrderDto } from './dto/update-order.dto';
 import { Order, OrderStatus } from '../entities/order.entity';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../entities/user.entity';
+import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
 @Controller('orders')
 export class OrdersController {
@@ -53,6 +56,13 @@ export class OrdersController {
     return this.ordersService.findOrdersByDriver(driverId);
   }
 
+  /** GET /api/orders/stats/counts — returns order counts grouped by status */
+  @Get('stats/counts')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  getStatusCounts(@Query('hubId') hubId?: string, @Query('regionId') regionId?: string) {
+    return this.ordersService.getStatusCounts(hubId, regionId);
+  }
+
   /** GET /api/orders/:id — single order detail */
   @Get(':id')
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
@@ -62,9 +72,9 @@ export class OrdersController {
 
   /** GET /api/orders/:id/pod — fetch POD proof for an order */
   @Get(':id/pod')
-  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
-  getOrderPod(@Param('id') id: string) {
-    return this.ordersService.getOrderPod(id);
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  getOrderPod(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.ordersService.getOrderPod(id, user);
   }
 
   /**
@@ -76,6 +86,16 @@ export class OrdersController {
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   updateCoordinates(@Param('id') id: string, @Body() dto: UpdateCoordinatesDto): Promise<Order> {
     return this.ordersService.updateCoordinates(id, dto);
+  }
+
+  /**
+   * PATCH /api/orders/:id
+   * Allows a Dispatcher or Admin to edit order details (receiver, address, COD, weight, notes).
+   */
+  @Patch(':id')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  update(@Param('id') id: string, @Body() dto: UpdateOrderDto): Promise<Order> {
+    return this.ordersService.update(id, dto);
   }
 
   /**
