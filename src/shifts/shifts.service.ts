@@ -13,6 +13,7 @@ import { Route } from '../entities/route.entity';
 import { Stop } from '../entities/stop.entity';
 import { OrderStatus } from '../entities/order.entity';
 import { Depot } from '../entities/depot.entity';
+import { User } from '../entities/user.entity';
 import { OpenShiftDto } from './dto/open-shift.dto';
 import { CloseShiftDto } from './dto/close-shift.dto';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -95,6 +96,11 @@ export class ShiftsService {
     });
 
     if (existingShift) {
+      await this.driverRepo.update(
+        { userId: driver.userId },
+        { currentShiftStatus: DriverShiftStatus.ONLINE_READY },
+      );
+
       this.logger.log(`Driver ${driver.userId} already has an open shift: ${existingShift.id}`);
       return {
         success: true,
@@ -404,6 +410,80 @@ export class ShiftsService {
       deliveredOrdersCount,
       failedOrdersCount,
       pendingCodAmount,
+    };
+  }
+
+  // ─── GET /driver/shifts/history ──────────────────────────────────────────────
+
+  /**
+   * Returns paginated shift history for the authenticated driver.
+   * Includes COD collections, submissions, discrepancy and settlement status.
+   */
+  async getShiftHistory(user: JwtPayload, page = 1, limit = 20) {
+    const driver = await this.resolveDriver(user);
+    const skip = (page - 1) * limit;
+
+    const [shifts, total] = await this.shiftRepo.findAndCount({
+      where: { driverId: driver.userId },
+      order: { startTime: 'DESC' },
+      skip,
+      take: limit,
+    });
+
+    // Lookup reconciling admin names
+    const adminMap = new Map<string, string>();
+    const adminIds = shifts
+      .map((s) => s.reconciledBy)
+      .filter((id): id is string => typeof id === 'string' && id.trim().length > 0);
+
+    if (adminIds.length > 0) {
+      try {
+        const users = await this.dataSource.getRepository(User).find({
+          where: { id: In(adminIds) },
+          select: ['id', 'fullName'],
+        });
+        for (const u of users) {
+          adminMap.set(u.id, u.fullName);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Could not load admin names for shift history: ${msg}`);
+      }
+    }
+
+    const items = shifts.map((shift) => {
+      const codCollected = Number(shift.codCollected) || 0;
+      const codSubmitted = Number(shift.codSubmitted) || 0;
+      const startingCashCod = Number(shift.startingCashCod) || 0;
+      const codDifference = codCollected - codSubmitted;
+
+      return {
+        id: shift.id,
+        driverId: shift.driverId,
+        startTime: shift.startTime,
+        endTime: shift.endTime ?? null,
+        status: shift.status,
+        startingCashCod,
+        codCollected,
+        codSubmitted,
+        codDifference,
+        currentLatitude: shift.currentLatitude !== null ? Number(shift.currentLatitude) : null,
+        currentLongitude: shift.currentLongitude !== null ? Number(shift.currentLongitude) : null,
+        reconciledBy: shift.reconciledBy,
+        reconciledByName: shift.reconciledBy ? adminMap.get(shift.reconciledBy) || null : null,
+        reconciledAt: shift.reconciledAt ?? null,
+        createdAt: shift.createdAt,
+        updatedAt: shift.updatedAt,
+      };
+    });
+
+    return {
+      success: true,
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
     };
   }
 }
