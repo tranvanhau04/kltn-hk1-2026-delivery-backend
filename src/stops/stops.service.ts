@@ -21,7 +21,8 @@ import { UserRole } from '../entities/user.entity';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { SubmitPodDto } from './dto/submit-pod.dto';
 import { FailStopDto } from './dto/fail-stop.dto';
-import { validateImageMagicBytes } from './utils/validate-image-magic';
+import { validateImageDetailed } from './utils/validate-image-magic';
+import { S3Service } from '../s3/s3.service';
 
 @Injectable()
 export class StopsService {
@@ -47,6 +48,8 @@ export class StopsService {
 
     @InjectRepository(OrderStatusHistory)
     private readonly historyRepo: Repository<OrderStatusHistory>,
+
+    private readonly s3Service: S3Service,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -155,13 +158,10 @@ export class StopsService {
       throw new BadRequestException('Vui lòng tải lên ảnh chụp kiện hàng (field "file")');
     }
 
-    // 1b. Validate Magic Bytes — chặn file giả mạo extension
-    const isRealImage = await validateImageMagicBytes(file.path);
-    if (!isRealImage) {
-      await this.safeDeleteFile(file.path);
-      throw new BadRequestException(
-        'File tải lên không phải ảnh thật. Chỉ chấp nhận ảnh JPEG, PNG, WebP (kiểm tra nội dung file).',
-      );
+    // 1b. Validate ảnh đa tầng (Magic Bytes + Sharp deep decode + pixel limits)
+    const validation = await validateImageDetailed(file.buffer);
+    if (!validation.isValid) {
+      throw new BadRequestException(validation.errorMessage || 'Ảnh tải lên không hợp lệ.');
     }
 
     // 2. Fetch stop & relations
@@ -171,24 +171,20 @@ export class StopsService {
     });
 
     if (!stop) {
-      await this.safeDeleteFile(file.path);
       throw new NotFoundException(`Không tìm thấy điểm dừng với id=${stopId}`);
     }
 
     const route = await this.routeRepo.findOne({ where: { id: stop.routeId } });
     if (!route) {
-      await this.safeDeleteFile(file.path);
       throw new NotFoundException(`Không tìm thấy lộ trình của điểm dừng này`);
     }
 
     if (user.role === UserRole.DRIVER && route.driverId !== user.sub) {
-      await this.safeDeleteFile(file.path);
       throw new ForbiddenException(`Bạn không có quyền cập nhật điểm dừng này`);
     }
 
     // 3. State & Idempotency protection (Prevent double-COD and double-completion)
     if (stop.status === 'COMPLETED') {
-      await this.safeDeleteFile(file.path);
       throw new ConflictException(
         'Điểm dừng này đã được giao hàng thành công trước đó (tránh ghi nhận 2 lần).',
       );
@@ -199,7 +195,6 @@ export class StopsService {
     // 4. Validate order and COD amount
     const order = stop.order;
     if (!order) {
-      await this.safeDeleteFile(file.path);
       throw new BadRequestException('Điểm dừng không gắn với đơn hàng nào hợp lệ');
     }
 
@@ -209,7 +204,6 @@ export class StopsService {
     if (dto.codCollected !== undefined && dto.codCollected !== null) {
       const collected = Number(dto.codCollected);
       if (isNaN(collected) || collected < 0 || collected > expectedCod) {
-        await this.safeDeleteFile(file.path);
         throw new BadRequestException(
           `Số tiền COD thực thu (${collected}) không hợp lệ (phải từ 0 đến ${expectedCod})`,
         );
@@ -217,19 +211,19 @@ export class StopsService {
       finalCod = collected;
     }
 
-    // Relative web URL for photo
-    const photoUrl = `/uploads/pod/${file.filename}`;
+    // Upload ảnh lên S3 Private Bucket trước khi mở DB Transaction (sử dụng format đã xác thực)
+    const { key: photoKey } = await this.s3Service.uploadFile(file, 'pod', validation.format);
 
-    // 5. Execute Database Transaction (File is already on disk, rollback unlinks it if DB fails)
+    // 5. Execute Database Transaction
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      // 5.1. Create or Update ProofOfDelivery record
+      // 5.1. Create or Update ProofOfDelivery record (Lưu Object Key: pod/pod-xxx.jpg)
       let pod: ProofOfDelivery;
       if (existingPod) {
-        existingPod.photoUrl = photoUrl;
+        existingPod.photoUrl = photoKey;
         existingPod.codCollected = finalCod;
         existingPod.failureReason = null;
         existingPod.rescheduledDate = null;
@@ -239,7 +233,7 @@ export class StopsService {
         pod = queryRunner.manager.create(ProofOfDelivery, {
           id: uuidv4(),
           stopId: stop.id,
-          photoUrl,
+          photoUrl: photoKey,
           codCollected: finalCod,
           failureReason: null,
           rescheduledDate: null,
@@ -274,7 +268,6 @@ export class StopsService {
       await queryRunner.manager.save(history);
 
       // 5.5. Accumulate COD in active driver shift — PESSIMISTIC LOCK
-      // Index: idx_shifts_driver_status (driver_id, status) → SELECT ... FOR UPDATE khóa chính xác 1 row
       let shiftCodTotal = 0;
       const activeShift = await queryRunner.manager.findOne(Shift, {
         where: { driverId: route.driverId, status: ShiftStatus.OPEN },
@@ -284,14 +277,12 @@ export class StopsService {
 
       if (activeShift) {
         if (finalCod > 0) {
-          // Atomic increment — giảm thời gian giữ lock xuống tối thiểu
           await queryRunner.manager.increment(
             Shift,
             { id: activeShift.id },
             'codCollected',
             finalCod,
           );
-          // Refresh giá trị mới nhất sau increment
           activeShift.codCollected = Number(activeShift.codCollected || 0) + finalCod;
         }
         shiftCodTotal = Number(activeShift.codCollected);
@@ -312,6 +303,9 @@ export class StopsService {
 
       await queryRunner.commitTransaction();
 
+      // Sinh Presigned URL tạm thời để client xem lại ngay
+      const presignedUrl = await this.s3Service.getPresignedUrl(photoKey);
+
       return {
         success: true,
         data: {
@@ -320,12 +314,13 @@ export class StopsService {
           orderStatus: order.status,
           codCollected: finalCod,
           shiftCodCollected: shiftCodTotal,
-          photoUrl: pod.photoUrl,
+          photoUrl: presignedUrl,
         },
       };
     } catch (err) {
       await queryRunner.rollbackTransaction();
-      await this.safeDeleteFile(file.path);
+      // Rollback: Xóa file rác trên S3 kèm retry & orphan logging
+      await this.s3Service.deleteFileWithRetry(photoKey);
       this.logger.error(`Lỗi khi lưu POD điểm dừng ${stopId}:`, err);
       throw err;
     } finally {
@@ -342,33 +337,31 @@ export class StopsService {
     file: Express.Multer.File | undefined,
     user: JwtPayload,
   ) {
-    // 0. Validate magic bytes if optional file is uploaded
+    // 0. Validate ảnh nếu có file đính kèm
+    let verifiedFormat = 'jpg';
     if (file) {
-      const isRealImage = await validateImageMagicBytes(file.path);
-      if (!isRealImage) {
-        await this.safeDeleteFile(file.path);
-        throw new BadRequestException(
-          'File tải lên không phải ảnh thật. Chỉ chấp nhận ảnh JPEG, PNG, WebP (kiểm tra nội dung file).',
-        );
+      const validation = await validateImageDetailed(file.buffer);
+      if (!validation.isValid) {
+        throw new BadRequestException(validation.errorMessage || 'Ảnh tải lên không hợp lệ.');
+      }
+      if (validation.format) {
+        verifiedFormat = validation.format;
       }
     }
 
     // 1. Business validations for action vs rescheduledDate
     if (dto.action === 'RESCHEDULED') {
       if (!dto.rescheduledDate) {
-        await this.safeDeleteFile(file?.path);
         throw new BadRequestException('rescheduledDate là bắt buộc khi action là RESCHEDULED');
       }
       const rescheduleTime = new Date(dto.rescheduledDate).getTime();
       if (isNaN(rescheduleTime) || rescheduleTime <= Date.now()) {
-        await this.safeDeleteFile(file?.path);
         throw new BadRequestException(
           'rescheduledDate phải là một mốc thời gian hợp lệ trong tương lai',
         );
       }
     } else if (dto.action === 'FAILED') {
       if (dto.rescheduledDate) {
-        await this.safeDeleteFile(file?.path);
         throw new BadRequestException('rescheduledDate không được truyền khi action là FAILED');
       }
     }
@@ -380,18 +373,15 @@ export class StopsService {
     });
 
     if (!stop) {
-      await this.safeDeleteFile(file?.path);
       throw new NotFoundException(`Không tìm thấy điểm dừng với id=${stopId}`);
     }
 
     const route = await this.routeRepo.findOne({ where: { id: stop.routeId } });
     if (!route) {
-      await this.safeDeleteFile(file?.path);
       throw new NotFoundException(`Không tìm thấy lộ trình của điểm dừng này`);
     }
 
     if (user.role === UserRole.DRIVER && route.driverId !== user.sub) {
-      await this.safeDeleteFile(file?.path);
       throw new ForbiddenException(`Bạn không có quyền cập nhật điểm dừng này`);
     }
 
@@ -407,11 +397,16 @@ export class StopsService {
 
     const order = stop.order;
     if (!order) {
-      await this.safeDeleteFile(file?.path);
       throw new BadRequestException('Điểm dừng không gắn với đơn hàng nào hợp lệ');
     }
 
-    const photoUrl = file ? `/uploads/pod/${file.filename}` : null;
+    // Upload ảnh minh chứng thất bại lên S3 (nếu có)
+    let photoKey: string | null = null;
+    if (file) {
+      const uploadResult = await this.s3Service.uploadFile(file, 'pod', verifiedFormat);
+      photoKey = uploadResult.key;
+    }
+
     const rescheduledDate = dto.action === 'RESCHEDULED' ? new Date(dto.rescheduledDate!) : null;
 
     // 4. Execute Database Transaction
@@ -420,10 +415,10 @@ export class StopsService {
     await queryRunner.startTransaction();
 
     try {
-      // 4.1. Create or Update ProofOfDelivery record (Failure Evidence)
+      // 4.1. Create or Update ProofOfDelivery record (Failure Evidence - Lưu Object Key)
       let pod: ProofOfDelivery;
       if (existingPod) {
-        existingPod.photoUrl = photoUrl;
+        if (photoKey) existingPod.photoUrl = photoKey;
         existingPod.codCollected = 0;
         existingPod.failureReason = dto.failureReason;
         existingPod.rescheduledDate = rescheduledDate;
@@ -433,7 +428,7 @@ export class StopsService {
         pod = queryRunner.manager.create(ProofOfDelivery, {
           id: uuidv4(),
           stopId: stop.id,
-          photoUrl,
+          photoUrl: photoKey,
           codCollected: 0,
           failureReason: dto.failureReason,
           rescheduledDate,
@@ -442,10 +437,7 @@ export class StopsService {
         await queryRunner.manager.save(pod);
       }
 
-      // 4.2. Update Stop status:
-      // Note: DB check constraint chk_stop_status allows: ('PENDING', 'ARRIVED', 'COMPLETED', 'FAILED', 'SKIPPED')
-      // If action === RESCHEDULED → stop.status = 'SKIPPED'
-      // If action === FAILED → stop.status = 'FAILED'
+      // 4.2. Update Stop status
       const newStopStatus = dto.action === 'RESCHEDULED' ? 'SKIPPED' : 'FAILED';
       stop.status = newStopStatus;
       if (!stop.arrivedAt) {
@@ -489,6 +481,8 @@ export class StopsService {
 
       await queryRunner.commitTransaction();
 
+      const presignedUrl = photoKey ? await this.s3Service.getPresignedUrl(photoKey) : null;
+
       return {
         success: true,
         data: {
@@ -498,12 +492,14 @@ export class StopsService {
           action: dto.action,
           failureReason: dto.failureReason,
           rescheduledDate: rescheduledDate,
-          photoUrl: pod.photoUrl,
+          photoUrl: presignedUrl,
         },
       };
     } catch (err) {
       await queryRunner.rollbackTransaction();
-      await this.safeDeleteFile(file?.path);
+      if (photoKey) {
+        await this.s3Service.deleteFileWithRetry(photoKey);
+      }
       this.logger.error(`Lỗi khi xử lý thất bại cho điểm dừng ${stopId}:`, err);
       throw err;
     } finally {
