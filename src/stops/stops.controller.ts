@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
@@ -66,5 +67,15 @@ export class StopsController {
     @CurrentUser() user: JwtPayload,
   ) {
     return this.stopsService.failStop(id, dto, file, user);
+  }
+
+  /**
+   * GET /api/stops/:id
+   * Chi tiết điểm dừng kèm đơn hàng và bằng chứng giao/hẹn lại (ProofOfDelivery)
+   */
+  @Get(':id')
+  @Roles(UserRole.DRIVER, UserRole.DISPATCHER, UserRole.ADMIN)
+  getStopDetail(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
+    return this.stopsService.getStopDetail(id, user);
   }
 }

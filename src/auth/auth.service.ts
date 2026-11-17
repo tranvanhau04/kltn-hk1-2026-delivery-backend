@@ -261,4 +261,42 @@ export class AuthService {
       };
     });
   }
+
+  /**
+   * Change password for authenticated user.
+   */
+  async changePassword(userId: string, currentPass: string, newPass: string) {
+    if (!currentPass || !newPass) {
+      throw new BadRequestException('Vui lòng nhập mật khẩu hiện tại và mật khẩu mới');
+    }
+    if (newPass.length < 6) {
+      throw new BadRequestException('Mật khẩu mới phải có ít nhất 6 ký tự');
+    }
+    if (currentPass === newPass) {
+      throw new BadRequestException('Mật khẩu mới không được trùng với mật khẩu hiện tại');
+    }
+
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.passwordHash')
+      .where('user.id = :id', { id: userId })
+      .getOne();
+
+    if (!user) {
+      throw new BadRequestException('Người dùng không tồn tại');
+    }
+
+    const isMatch = await bcrypt.compare(currentPass, user.passwordHash);
+    if (!isMatch) {
+      throw new BadRequestException('Mật khẩu hiện tại không chính xác');
+    }
+
+    const newPasswordHash = await bcrypt.hash(newPass, 10);
+    await this.userRepository.update({ id: user.id }, { passwordHash: newPasswordHash });
+
+    return {
+      success: true,
+      message: 'Đổi mật khẩu thành công',
+    };
+  }
 }

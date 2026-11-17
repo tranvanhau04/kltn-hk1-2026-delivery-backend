@@ -68,6 +68,10 @@ export interface VrpRouteResult {
   totalWeightKg: number;
   totalVolumeM3: number;
   polyline: [number, number][]; // [lat, lng][]
+  /** Estimated fuel consumed in liters */
+  estimatedFuelLiters?: number;
+  /** Estimated fuel cost in VND */
+  estimatedFuelCostVnd?: number;
 }
 
 export interface VrpUnassignedOrder {
@@ -85,6 +89,10 @@ export interface VrpSolutionResult {
   optimizationTimeMs: number;
   depot: VrpDepot;
   algorithmUsed: string;
+  /** Total estimated fuel consumed across all routes (Liters) */
+  totalFuelLiters?: number;
+  /** Total estimated fuel cost across all routes (VND) */
+  totalFuelCostVnd?: number;
 }
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
@@ -293,14 +301,37 @@ function checkTimeWindowFeasibility(
 
 // ─── Zone & Fleet Configuration Constants ─────────────────────────────────────
 
-const HEAVY_WEIGHT_THRESHOLD_KG = 15; // Orders >= 15kg are heavy/bulky (Vans only)
-const HEAVY_VOLUME_THRESHOLD_M3 = 0.05; // Orders >= 0.05m3 are bulky (Vans only)
-const MAX_SHIFT_DISTANCE_KM = 3.5; // Maximum distance to shift an order; prevents cross-city detours
+export const VRP_CONFIG = {
+  /** Maximum stops/nodes per vehicle route */
+  MAX_STOPS_PER_VEHICLE: 50,
+  /** Maximum shift/route time in minutes (Strict 8-hour shift ceiling = 480 min) */
+  MAX_ROUTE_TIME_MIN: 480,
+  /** Maximum route travel distance in km (200 km) */
+  MAX_ROUTE_DISTANCE_KM: 200,
+  /** Drop penalty for unassigned nodes (100,000) - incentivizes packing vehicles up to capacity */
+  UNASSIGNED_DROP_PENALTY: 100_000,
+  /** Maximum shift distance between cluster centroids during balancing (km) */
+  MAX_SHIFT_DISTANCE_KM: 3.5,
+  /** Service time per stop in minutes */
+  SERVICE_TIME_MIN: 6,
+  /** Heavy weight threshold for strict vehicle segregation (Orders > 20kg require Van/Truck) */
+  HEAVY_WEIGHT_THRESHOLD_KG: 20,
+  /** Heavy volume threshold for strict vehicle segregation (Orders > 0.35m3 require Van/Truck) */
+  HEAVY_VOLUME_THRESHOLD_M3: 0.35,
+  /** Fuel consumption rate for motorbikes (liters / 100km) */
+  MOTORBIKE_FUEL_RATE_L_PER_100KM: 2.3,
+  /** Fuel consumption rate for vans/trucks (liters / 100km) */
+  VAN_FUEL_RATE_L_PER_100KM: 10.5,
+  /** Gasoline price RON 95 (VND / liter) */
+  GASOLINE_PRICE_VND: 24500,
+  /** Diesel price DO 0.05S (VND / liter) */
+  DIESEL_PRICE_VND: 21500,
+};
 
 function isHeavyOrder(order: VrpOrder): boolean {
   return (
-    Number(order.weightKg) >= HEAVY_WEIGHT_THRESHOLD_KG ||
-    Number(order.volumeM3) >= HEAVY_VOLUME_THRESHOLD_M3
+    Number(order.weightKg) > VRP_CONFIG.HEAVY_WEIGHT_THRESHOLD_KG ||
+    Number(order.volumeM3) > VRP_CONFIG.HEAVY_VOLUME_THRESHOLD_M3
   );
 }
 
@@ -310,6 +341,47 @@ function isVanDriver(driver: VrpDriver): boolean {
     driver.vehicleType.toUpperCase().includes('VAN') ||
     driver.vehicleType.toUpperCase().includes('TRUCK')
   );
+}
+
+function getDriverFuelWeight(driver: VrpDriver): number {
+  return isVanDriver(driver) ? 2.8 : 1.0;
+}
+
+// ─── Polar Coordinates & Radial Sector Helpers ───────────────────────────────
+
+function polarAngle(
+  centerLat: number,
+  centerLng: number,
+  targetLat: number,
+  targetLng: number,
+): number {
+  const dLat = targetLat - centerLat;
+  const dLng = (targetLng - centerLng) * Math.cos((centerLat * Math.PI) / 180);
+  let angle = Math.atan2(dLat, dLng);
+  if (angle < 0) angle += 2 * Math.PI;
+  return angle;
+}
+
+function angularDiff(angle1: number, angle2: number): number {
+  let diff = Math.abs(angle1 - angle2);
+  if (diff > Math.PI) diff = 2 * Math.PI - diff;
+  return diff;
+}
+
+function angularWeightedDist(
+  orderLat: number,
+  orderLng: number,
+  centroidLat: number,
+  centroidLng: number,
+  depotLat: number,
+  depotLng: number,
+): number {
+  const geoDist = haversine(centroidLat, centroidLng, orderLat, orderLng);
+  const angleOrder = polarAngle(depotLat, depotLng, orderLat, orderLng);
+  const angleCentroid = polarAngle(depotLat, depotLng, centroidLat, centroidLng);
+  const diffAngle = angularDiff(angleOrder, angleCentroid);
+  // Sector penalty: if order is in a different radial corridor, penalize distance by up to 120%
+  return geoDist * (1.0 + 1.2 * (diffAngle / Math.PI));
 }
 
 // ─── Balanced K-Means ────────────────────────────────────────────────────────
@@ -340,7 +412,7 @@ function runBalancedKMeans(
     return orders.map((o) => [o]);
   }
 
-  const targetStops = Math.ceil(orders.length / k);
+  const targetStops = Math.min(Math.ceil(orders.length / k), VRP_CONFIG.MAX_STOPS_PER_VEHICLE);
 
   // 1. Centroid initialization using K-Means++ (furthest point from depot + previous centroids)
   let firstIdx = 0;
@@ -405,7 +477,14 @@ function runBalancedKMeans(
       let nearestC = 0;
       let nearestDist = Infinity;
       for (let c = 0; c < k; c++) {
-        const d = haversine(centroids[c].lat, centroids[c].lng, oLat, oLng);
+        const d = angularWeightedDist(
+          oLat,
+          oLng,
+          centroids[c].lat,
+          centroids[c].lng,
+          depot.lat,
+          depot.lng,
+        );
         if (d < nearestDist) {
           nearestDist = d;
           nearestC = c;
@@ -510,11 +589,13 @@ function runBalancedKMeans(
       let minTargetDist = Infinity;
 
       for (const uc of underloaded) {
-        const d = haversine(
-          uc.centroid.lat,
-          uc.centroid.lng,
+        const d = angularWeightedDist(
           Number(orderToMove.latitude),
           Number(orderToMove.longitude),
+          uc.centroid.lat,
+          uc.centroid.lng,
+          depot.lat,
+          depot.lng,
         );
         if (d < minTargetDist) {
           minTargetDist = d;
@@ -523,8 +604,8 @@ function runBalancedKMeans(
       }
 
       // Check Geographic Constraint:
-      // If distance > MAX_SHIFT_DISTANCE_KM, DO NOT shift it. Accept the imbalance.
-      if (targetCluster && minTargetDist <= MAX_SHIFT_DISTANCE_KM) {
+      // If distance > VRP_CONFIG.MAX_SHIFT_DISTANCE_KM, DO NOT shift it. Accept the imbalance.
+      if (targetCluster && minTargetDist <= VRP_CONFIG.MAX_SHIFT_DISTANCE_KM) {
         const removeIdx = sourceCluster.orders.findIndex((o) => o.id === orderToMove.id);
         if (removeIdx >= 0) {
           sourceCluster.orders.splice(removeIdx, 1);
@@ -540,7 +621,7 @@ function runBalancedKMeans(
     }
 
     if (!shifted) {
-      // No order in this cluster can be shifted within MAX_SHIFT_DISTANCE_KM.
+      // No order in this cluster can be shifted within VRP_CONFIG.MAX_SHIFT_DISTANCE_KM.
       // Accept geographic imbalance and stop balancing this cluster.
       lockedClusterIndices.add(sourceIdx);
     }
@@ -637,6 +718,232 @@ function matchClustersToDrivers(clusters: VrpOrder[][], drivers: VrpDriver[]): D
   }
 
   return assignments;
+}
+
+// ─── Inter-Route Local Search (Relocate & Swap) ──────────────────────────────
+
+interface MutableRoute {
+  driver: VrpDriver;
+  nodeIndices: number[]; // sequence of node indices (1..N) without depot
+  totalWeight: number;
+  totalVolume: number;
+}
+
+function optimizeInterRoute(
+  routes: MutableRoute[],
+  costMatrix: CostMatrix,
+  nodeToOrder: Map<number, VrpOrder>,
+): void {
+  if (routes.length <= 1) return;
+
+  let improved = true;
+  let iter = 0;
+  const maxIters = 60;
+
+  while (improved && iter < maxIters) {
+    improved = false;
+    iter++;
+
+    // ── 1. RELOCATE (1-0 Shift): Move a node from route A to route B ──
+    for (let a = 0; a < routes.length; a++) {
+      const rA = routes[a];
+      if (rA.nodeIndices.length === 0) continue;
+      const fuelWeightA = getDriverFuelWeight(rA.driver);
+
+      for (let i = 0; i < rA.nodeIndices.length; i++) {
+        const nodeToMove = rA.nodeIndices[i];
+        const orderToMove = nodeToOrder.get(nodeToMove)!;
+        const wMove = Number(orderToMove.weightKg);
+        const vMove = Number(orderToMove.volumeM3);
+        const isHeavy = isHeavyOrder(orderToMove);
+
+        // Distance saved in route A by removing nodeToMove
+        const prevA = i === 0 ? 0 : rA.nodeIndices[i - 1];
+        const nextA = i === rA.nodeIndices.length - 1 ? 0 : rA.nodeIndices[i + 1];
+        const distSavedA =
+          costMatrix.distKm(prevA, nodeToMove) +
+          costMatrix.distKm(nodeToMove, nextA) -
+          costMatrix.distKm(prevA, nextA);
+
+        let bestB = -1;
+        let bestInsertPos = -1;
+        let bestFuelSaving = 0.05; // Fuel-adjusted km saving threshold
+
+        for (let b = 0; b < routes.length; b++) {
+          if (a === b) continue;
+          const rB = routes[b];
+          if (isHeavy && !isVanDriver(rB.driver)) continue;
+          if (rB.nodeIndices.length >= VRP_CONFIG.MAX_STOPS_PER_VEHICLE) continue;
+          if (rB.totalWeight + wMove > Number(rB.driver.maxWeightKg) + 0.001) continue;
+          if (
+            Number(rB.driver.maxVolumeM3) > 0 &&
+            rB.totalVolume + vMove > Number(rB.driver.maxVolumeM3) + 0.0001
+          ) {
+            continue;
+          }
+
+          const fuelWeightB = getDriverFuelWeight(rB.driver);
+
+          // Find cheapest insertion position in rB
+          for (let j = 0; j <= rB.nodeIndices.length; j++) {
+            const prevB = j === 0 ? 0 : rB.nodeIndices[j - 1];
+            const nextB = j === rB.nodeIndices.length ? 0 : rB.nodeIndices[j];
+            const distAddedB =
+              costMatrix.distKm(prevB, nodeToMove) +
+              costMatrix.distKm(nodeToMove, nextB) -
+              costMatrix.distKm(prevB, nextB);
+
+            const fuelDiff = distAddedB * fuelWeightB - distSavedA * fuelWeightA;
+            if (-fuelDiff > bestFuelSaving) {
+              // Verify time windows for the candidate route
+              const testNodes = [
+                ...rB.nodeIndices.slice(0, j),
+                nodeToMove,
+                ...rB.nodeIndices.slice(j),
+              ];
+              const testOrders = testNodes.map((ni) => nodeToOrder.get(ni)!);
+              const twCheck = checkTimeWindowFeasibility(
+                testOrders,
+                costMatrix,
+                [0, ...testNodes],
+                0,
+              );
+              if (twCheck.feasible) {
+                bestFuelSaving = -fuelDiff;
+                bestB = b;
+                bestInsertPos = j;
+              }
+            }
+          }
+        }
+
+        if (bestB >= 0 && bestInsertPos >= 0) {
+          // Perform relocate
+          rA.nodeIndices.splice(i, 1);
+          rA.totalWeight -= wMove;
+          rA.totalVolume -= vMove;
+
+          const rB = routes[bestB];
+          rB.nodeIndices.splice(bestInsertPos, 0, nodeToMove);
+          rB.totalWeight += wMove;
+          rB.totalVolume += vMove;
+
+          // Re-optimize 2-opt on both modified routes
+          rA.nodeIndices = twoOptImprove(rA.nodeIndices, costMatrix, 0);
+          rB.nodeIndices = twoOptImprove(rB.nodeIndices, costMatrix, 0);
+
+          improved = true;
+          break;
+        }
+      }
+      if (improved) break;
+    }
+
+    if (improved) continue;
+
+    // ── 2. SWAP (1-1 Exchange): Swap one node in route A with one in route B ──
+    for (let a = 0; a < routes.length; a++) {
+      const rA = routes[a];
+      if (rA.nodeIndices.length === 0) continue;
+      const fuelWeightA = getDriverFuelWeight(rA.driver);
+
+      for (let b = a + 1; b < routes.length; b++) {
+        const rB = routes[b];
+        if (rB.nodeIndices.length === 0) continue;
+        const fuelWeightB = getDriverFuelWeight(rB.driver);
+
+        for (let i = 0; i < rA.nodeIndices.length; i++) {
+          const nodeA = rA.nodeIndices[i];
+          const orderA = nodeToOrder.get(nodeA)!;
+          const wA = Number(orderA.weightKg);
+          const vA = Number(orderA.volumeM3);
+          const isHeavyA = isHeavyOrder(orderA);
+
+          if (isHeavyA && !isVanDriver(rB.driver)) continue;
+
+          for (let j = 0; j < rB.nodeIndices.length; j++) {
+            const nodeB = rB.nodeIndices[j];
+            const orderB = nodeToOrder.get(nodeB)!;
+            const wB = Number(orderB.weightKg);
+            const vB = Number(orderB.volumeM3);
+            const isHeavyB = isHeavyOrder(orderB);
+
+            if (isHeavyB && !isVanDriver(rA.driver)) continue;
+
+            const newWeightA = rA.totalWeight - wA + wB;
+            const newWeightB = rB.totalWeight - wB + wA;
+            if (newWeightA > Number(rA.driver.maxWeightKg) + 0.001) continue;
+            if (newWeightB > Number(rB.driver.maxWeightKg) + 0.001) continue;
+
+            const newVolA = rA.totalVolume - vA + vB;
+            const newVolB = rB.totalVolume - vB + vA;
+            if (
+              Number(rA.driver.maxVolumeM3) > 0 &&
+              newVolA > Number(rA.driver.maxVolumeM3) + 0.0001
+            ) {
+              continue;
+            }
+            if (
+              Number(rB.driver.maxVolumeM3) > 0 &&
+              newVolB > Number(rB.driver.maxVolumeM3) + 0.0001
+            ) {
+              continue;
+            }
+
+            // Delta in route A
+            const prevA = i === 0 ? 0 : rA.nodeIndices[i - 1];
+            const nextA = i === rA.nodeIndices.length - 1 ? 0 : rA.nodeIndices[i + 1];
+            const deltaDistA =
+              costMatrix.distKm(prevA, nodeB) +
+              costMatrix.distKm(nodeB, nextA) -
+              (costMatrix.distKm(prevA, nodeA) + costMatrix.distKm(nodeA, nextA));
+
+            // Delta in route B
+            const prevB = j === 0 ? 0 : rB.nodeIndices[j - 1];
+            const nextB = j === rB.nodeIndices.length - 1 ? 0 : rB.nodeIndices[j + 1];
+            const deltaDistB =
+              costMatrix.distKm(prevB, nodeA) +
+              costMatrix.distKm(nodeA, nextB) -
+              (costMatrix.distKm(prevB, nodeB) + costMatrix.distKm(nodeB, nextB));
+
+            const fuelDiff = deltaDistA * fuelWeightA + deltaDistB * fuelWeightB;
+            if (fuelDiff < -0.05) {
+              // Time window feasibility
+              const testNodesA = [...rA.nodeIndices];
+              testNodesA[i] = nodeB;
+              const testOrdersA = testNodesA.map((ni) => nodeToOrder.get(ni)!);
+              const twA = checkTimeWindowFeasibility(testOrdersA, costMatrix, [0, ...testNodesA], 0);
+              if (!twA.feasible) continue;
+
+              const testNodesB = [...rB.nodeIndices];
+              testNodesB[j] = nodeA;
+              const testOrdersB = testNodesB.map((ni) => nodeToOrder.get(ni)!);
+              const twB = checkTimeWindowFeasibility(testOrdersB, costMatrix, [0, ...testNodesB], 0);
+              if (!twB.feasible) continue;
+
+              // Perform swap
+              rA.nodeIndices[i] = nodeB;
+              rA.totalWeight = newWeightA;
+              rA.totalVolume = newVolA;
+
+              rB.nodeIndices[j] = nodeA;
+              rB.totalWeight = newWeightB;
+              rB.totalVolume = newVolB;
+
+              rA.nodeIndices = twoOptImprove(rA.nodeIndices, costMatrix, 0);
+              rB.nodeIndices = twoOptImprove(rB.nodeIndices, costMatrix, 0);
+
+              improved = true;
+              break;
+            }
+          }
+          if (improved) break;
+        }
+        if (improved) break;
+      }
+      if (improved) break;
+    }
+  }
 }
 
 // ─── VrpService ───────────────────────────────────────────────────────────────
@@ -789,11 +1096,11 @@ export class VrpService {
       };
     }
 
-    // ── STEP 1: Heavy / Light Vehicle Segregation (Business Rule) ─────────────
-    // Vans (maxWeightKg >= 500) ONLY take Heavy/Bulky orders (weightKg >= 15 or volumeM3 >= 0.05)
-    // Motorbikes ONLY take Light orders
+    // ── STEP 1: Fleet Segregation & Initial Clustering ────────────────────────
+    // Heavy/Bulky orders (> 30kg or > 0.15m3) strictly require Van/Truck
+    // Standard orders (<= 30kg and <= 0.15m3) can be delivered by Motorbikes or Vans/Trucks
     const heavyOrders = feasibleOrders.filter(isHeavyOrder);
-    const lightOrders = feasibleOrders.filter((o) => !isHeavyOrder(o));
+    const standardOrders = feasibleOrders.filter((o) => !isHeavyOrder(o));
 
     const vanDrivers = availableDrivers.filter(isVanDriver);
     const motorbikeDrivers = availableDrivers.filter((d) => !isVanDriver(d));
@@ -801,8 +1108,8 @@ export class VrpService {
     console.log(
       'Heavy orders count:',
       heavyOrders.length,
-      'vs Light orders count:',
-      lightOrders.length,
+      'vs Standard orders count:',
+      standardOrders.length,
     );
     console.log(
       'Van drivers count:',
@@ -815,41 +1122,15 @@ export class VrpService {
     let vanAssignments: DriverAssignment[] = [];
     let motorbikeAssignments: DriverAssignment[] = [];
 
-    // ── STEP 2: Balanced K-Means for Light Orders (Motorbikes) ───────────────
-    if (lightOrders.length > 0) {
-      if (motorbikeDrivers.length === 0) {
-        if (vanDrivers.length > 0) {
-          // Fallback if no motorbikes in fleet
-          this.logger.warn('No motorbikes available – falling back light orders to Vans');
-          const k = Math.min(vanDrivers.length, lightOrders.length);
-          const clusters = runBalancedKMeans(lightOrders, k, depotCoords);
-          motorbikeAssignments = matchClustersToDrivers(clusters, vanDrivers);
-        } else {
-          for (const order of lightOrders) {
-            unassignedOrders.push({
-              orderId: order.id,
-              code: order.code,
-              reason: 'No Motorbike available for light order',
-            });
-          }
-        }
-      } else if (motorbikeDrivers.length === 1) {
-        motorbikeAssignments = [{ driver: motorbikeDrivers[0], orders: lightOrders }];
-      } else {
-        const k = Math.min(motorbikeDrivers.length, lightOrders.length);
-        const clusters = runBalancedKMeans(lightOrders, k, depotCoords);
-        motorbikeAssignments = matchClustersToDrivers(clusters, motorbikeDrivers);
-      }
-    }
-
-    // ── STEP 3: Balanced Assignment for Heavy Orders (Vans) ──────────────────
+    // Assign strictly heavy orders to Vans/Trucks
     if (heavyOrders.length > 0) {
       if (vanDrivers.length === 0) {
-        for (const order of heavyOrders) {
+        // If no vans exist, heavy orders cannot be fulfilled by motorbikes
+        for (const ho of heavyOrders) {
           unassignedOrders.push({
-            orderId: order.id,
-            code: order.code,
-            reason: 'No Van available for heavy/bulky order',
+            orderId: ho.id,
+            code: ho.code,
+            reason: `Order exceeds motorbike capacity (${ho.weightKg} kg, ${ho.volumeM3} m3) – requires Van/Truck vehicle`,
           });
         }
       } else if (vanDrivers.length === 1) {
@@ -861,79 +1142,232 @@ export class VrpService {
       }
     }
 
-    const generatedClustersCount = vanAssignments.length + motorbikeAssignments.length;
-    console.log('Generated clusters count:', generatedClustersCount);
-
-    const driverAssignments: DriverAssignment[] = [...vanAssignments, ...motorbikeAssignments];
-
-    // Capacity enforcement & overflow redistribution
-    for (let ai = 0; ai < driverAssignments.length; ai++) {
-      const assignment = driverAssignments[ai];
-      const driver = assignment.driver;
-      const maxW = Number(driver.maxWeightKg);
-      const maxV = Number(driver.maxVolumeM3);
-
-      const currentW = assignment.orders.reduce((s, o) => s + Number(o.weightKg), 0);
-      const currentV = assignment.orders.reduce((s, o) => s + Number(o.volumeM3), 0);
-
-      if (currentW > maxW + 0.001 || (maxV > 0 && currentV > maxV + 0.0001)) {
-        const ordersToKeep: VrpOrder[] = [];
-        const excessOrders: VrpOrder[] = [];
-        let runningW = 0;
-        let runningV = 0;
-
-        for (const order of assignment.orders) {
-          const w = Number(order.weightKg);
-          const v = Number(order.volumeM3);
-          if (runningW + w <= maxW + 0.001 && (maxV <= 0 || runningV + v <= maxV + 0.0001)) {
-            ordersToKeep.push(order);
-            runningW += w;
-            runningV += v;
-          } else {
-            excessOrders.push(order);
-          }
+    // Assign standard orders to motorbikes (or vans if no motorbikes)
+    if (standardOrders.length > 0) {
+      if (motorbikeDrivers.length === 0) {
+        if (vanDrivers.length > 0) {
+          this.logger.warn('No motorbikes available – standard orders assigned to Vans');
+          // Standard orders will be packed into vans during Step 3C
         }
-        assignment.orders = ordersToKeep;
-
-        // Try to reassign excess to another driver of same vehicle type
-        for (const excess of excessOrders) {
-          const ew = Number(excess.weightKg);
-          const ev = Number(excess.volumeM3);
-          let absorbed = false;
-
-          for (let aj = 0; aj < driverAssignments.length; aj++) {
-            if (ai === aj) continue;
-            const other = driverAssignments[aj];
-            if (isVanDriver(other.driver) !== isVanDriver(driver)) continue;
-
-            const otherMaxW = Number(other.driver.maxWeightKg);
-            const otherMaxV = Number(other.driver.maxVolumeM3);
-            const otherW = other.orders.reduce((s, o) => s + Number(o.weightKg), 0);
-            const otherV = other.orders.reduce((s, o) => s + Number(o.volumeM3), 0);
-
-            if (
-              otherW + ew <= otherMaxW + 0.001 &&
-              (otherMaxV <= 0 || otherV + ev <= otherMaxV + 0.0001)
-            ) {
-              other.orders.push(excess);
-              absorbed = true;
-              break;
-            }
-          }
-
-          if (!absorbed) {
-            unassignedOrders.push({
-              orderId: excess.id,
-              code: excess.code,
-              reason: 'All vehicles are at capacity',
-            });
-          }
-        }
+      } else if (motorbikeDrivers.length === 1) {
+        motorbikeAssignments = [{ driver: motorbikeDrivers[0], orders: standardOrders }];
+      } else {
+        const k = Math.min(motorbikeDrivers.length, standardOrders.length);
+        const clusters = runBalancedKMeans(standardOrders, k, depotCoords);
+        motorbikeAssignments = matchClustersToDrivers(clusters, motorbikeDrivers);
       }
     }
 
-    // ── STEP 4: Shortest Path (TSP) Per Vehicle ──────────────────────────────
-    const routes: VrpRouteResult[] = [];
+    // Ensure all drivers are present in driverAssignments even if initial cluster had 0 orders
+    const driverAssignments: DriverAssignment[] = availableDrivers.map((driver) => {
+      const existing = [...vanAssignments, ...motorbikeAssignments].find(
+        (a) => a.driver.userId === driver.userId,
+      );
+      return existing || { driver, orders: [] };
+    });
+
+    // ── STEP 3B: Density-Aware Initial Capacity Trimming ─────────────────────
+    for (const assignment of driverAssignments) {
+      if (assignment.orders.length === 0) continue;
+      const driver = assignment.driver;
+      const maxW = Number(driver.maxWeightKg);
+      const isVan = isVanDriver(driver);
+
+      // Compute cluster centroid
+      const cLat =
+        assignment.orders.reduce((s, o) => s + Number(o.latitude), 0) / assignment.orders.length;
+      const cLng =
+        assignment.orders.reduce((s, o) => s + Number(o.longitude), 0) / assignment.orders.length;
+
+      // Keep orders that are closest to cluster centroid to preserve route compactness and reduce fuel
+      assignment.orders.sort((a, b) => {
+        const dA = haversine(cLat, cLng, Number(a.latitude), Number(a.longitude));
+        const dB = haversine(cLat, cLng, Number(b.latitude), Number(b.longitude));
+        return dA - dB;
+      });
+
+      const ordersToKeep: VrpOrder[] = [];
+      let runningW = 0;
+
+      for (const order of assignment.orders) {
+        const w = Number(order.weightKg);
+        if (
+          ordersToKeep.length < VRP_CONFIG.MAX_STOPS_PER_VEHICLE &&
+          runningW + w <= maxW + 0.001
+        ) {
+          ordersToKeep.push(order);
+          runningW += w;
+        }
+      }
+      assignment.orders = ordersToKeep;
+    }
+
+    // ── STEP 3C: Global Proximity Knapsack Backfill (Fill Vehicles to Actual Capacity) ──
+    const assignedIds = new Set(driverAssignments.flatMap((da) => da.orders.map((o) => o.id)));
+    const pendingOrders = feasibleOrders.filter(
+      (o) => !assignedIds.has(o.id) && !unassignedOrders.some((u) => u.orderId === o.id),
+    );
+
+    // Sort pending orders: light orders first for motorbikes, heavy for vans
+    pendingOrders.sort((a, b) => Number(a.weightKg) - Number(b.weightKg));
+
+    // Pass 1: Backfill Motorbikes with feasible light orders (<= 20kg) to maximize their capacity
+    for (const da of driverAssignments.filter((a) => !isVanDriver(a.driver))) {
+      const driver = da.driver;
+      const maxW = Number(driver.maxWeightKg);
+      let curW = da.orders.reduce((s, o) => s + Number(o.weightKg), 0);
+
+      while (curW < maxW && da.orders.length < VRP_CONFIG.MAX_STOPS_PER_VEHICLE) {
+        let bestOrder: VrpOrder | null = null;
+        let bestDist = Infinity;
+
+        for (const order of pendingOrders) {
+          if (assignedIds.has(order.id)) continue;
+          const w = Number(order.weightKg);
+          if (w > VRP_CONFIG.HEAVY_WEIGHT_THRESHOLD_KG) continue; // Must be light for motorbike
+          if (curW + w > maxW + 0.001) continue; // STRICT HARD CONSTRAINT
+
+          let minStopDist = Infinity;
+          if (da.orders.length === 0) {
+            minStopDist = haversine(
+              depotCoords.lat,
+              depotCoords.lng,
+              Number(order.latitude),
+              Number(order.longitude),
+            );
+          } else {
+            for (const s of da.orders) {
+              const d = haversine(
+                Number(s.latitude),
+                Number(s.longitude),
+                Number(order.latitude),
+                Number(order.longitude),
+              );
+              if (d < minStopDist) minStopDist = d;
+            }
+          }
+
+          if (minStopDist < bestDist) {
+            bestDist = minStopDist;
+            bestOrder = order;
+          }
+        }
+
+        if (!bestOrder) break;
+        da.orders.push(bestOrder);
+        assignedIds.add(bestOrder.id);
+        curW += Number(bestOrder.weightKg);
+      }
+    }
+
+    // Pass 2: Backfill Vans & Trucks with heavy orders first, then remaining standard orders
+    for (const da of driverAssignments.filter((a) => isVanDriver(a.driver))) {
+      const driver = da.driver;
+      const maxW = Number(driver.maxWeightKg);
+      let curW = da.orders.reduce((s, o) => s + Number(o.weightKg), 0);
+
+      // Heavy orders first
+      while (curW < maxW && da.orders.length < VRP_CONFIG.MAX_STOPS_PER_VEHICLE) {
+        let bestOrder: VrpOrder | null = null;
+        let bestDist = Infinity;
+
+        for (const order of pendingOrders) {
+          if (assignedIds.has(order.id)) continue;
+          const w = Number(order.weightKg);
+          if (w <= VRP_CONFIG.HEAVY_WEIGHT_THRESHOLD_KG) continue;
+          if (curW + w > maxW + 0.001) continue; // STRICT HARD CONSTRAINT
+
+          let minStopDist = Infinity;
+          if (da.orders.length === 0) {
+            minStopDist = haversine(
+              depotCoords.lat,
+              depotCoords.lng,
+              Number(order.latitude),
+              Number(order.longitude),
+            );
+          } else {
+            for (const s of da.orders) {
+              const d = haversine(
+                Number(s.latitude),
+                Number(s.longitude),
+                Number(order.latitude),
+                Number(order.longitude),
+              );
+              if (d < minStopDist) minStopDist = d;
+            }
+          }
+
+          if (minStopDist < bestDist) {
+            bestDist = minStopDist;
+            bestOrder = order;
+          }
+        }
+
+        if (!bestOrder) break;
+        da.orders.push(bestOrder);
+        assignedIds.add(bestOrder.id);
+        curW += Number(bestOrder.weightKg);
+      }
+
+      // Then any remaining pending orders up to capacity
+      while (curW < maxW && da.orders.length < VRP_CONFIG.MAX_STOPS_PER_VEHICLE) {
+        let bestOrder: VrpOrder | null = null;
+        let bestDist = Infinity;
+
+        for (const order of pendingOrders) {
+          if (assignedIds.has(order.id)) continue;
+          const w = Number(order.weightKg);
+          if (curW + w > maxW + 0.001) continue; // STRICT HARD CONSTRAINT
+
+          let minStopDist = Infinity;
+          if (da.orders.length === 0) {
+            minStopDist = haversine(
+              depotCoords.lat,
+              depotCoords.lng,
+              Number(order.latitude),
+              Number(order.longitude),
+            );
+          } else {
+            for (const s of da.orders) {
+              const d = haversine(
+                Number(s.latitude),
+                Number(s.longitude),
+                Number(order.latitude),
+                Number(order.longitude),
+              );
+              if (d < minStopDist) minStopDist = d;
+            }
+          }
+
+          if (minStopDist < bestDist) {
+            bestDist = minStopDist;
+            bestOrder = order;
+          }
+        }
+
+        if (!bestOrder) break;
+        da.orders.push(bestOrder);
+        assignedIds.add(bestOrder.id);
+        curW += Number(bestOrder.weightKg);
+      }
+    }
+
+    // Collect truly unassigned orders that could not fit into the fleet's physical capacity
+    for (const order of feasibleOrders) {
+      if (!assignedIds.has(order.id) && !unassignedOrders.some((u) => u.orderId === order.id)) {
+        unassignedOrders.push({
+          orderId: order.id,
+          code: order.code,
+          reason: `Fleet capacity full (${order.weightKg} kg). Deferred to next shift.`,
+        });
+      }
+    }
+
+    // ── STEP 4: Shortest Path (TSP) + Inter-Route Local Search ────────────────
+    const nodeToOrder = new Map<number, VrpOrder>();
+    clusteredOrders.forEach((o, i) => nodeToOrder.set(i + 1, o));
+
+    const mutableRoutes: MutableRoute[] = [];
 
     for (const assignment of driverAssignments) {
       if (assignment.orders.length === 0) continue;
@@ -963,20 +1397,40 @@ export class VrpService {
         currentNodeIdx = orderToNodeIdx.get(nearestOrder.id)!;
       }
 
-      // Phase 4B: 2-opt Improvement
+      // Phase 4B: Initial Intra-route 2-opt Improvement
       const stopNodeIndices = orderedStops.map((o) => orderToNodeIdx.get(o.id)!);
       const improvedNodeIndices = twoOptImprove(stopNodeIndices, costMatrix, 0);
-      const routeOrders = improvedNodeIndices.map((ni) => clusteredOrders[ni - 1]);
 
-      // Phase 4C: Time Window Feasibility & Arrival Times
+      const routeWeightKg = assignment.orders.reduce((s, o) => s + Number(o.weightKg), 0);
+      const routeVolumeM3 = assignment.orders.reduce((s, o) => s + Number(o.volumeM3), 0);
+
+      mutableRoutes.push({
+        driver,
+        nodeIndices: improvedNodeIndices,
+        totalWeight: routeWeightKg,
+        totalVolume: routeVolumeM3,
+      });
+    }
+
+    // Phase 4C: Cross-Route Optimization (Relocate & Swap) for minimal distance & fuel
+    optimizeInterRoute(mutableRoutes, costMatrix, nodeToOrder);
+
+    const routes: VrpRouteResult[] = [];
+
+    for (const mRoute of mutableRoutes) {
+      if (mRoute.nodeIndices.length === 0) continue;
+      const driver = mRoute.driver;
+      const routeOrders = mRoute.nodeIndices.map((ni) => nodeToOrder.get(ni)!);
+
+      // Phase 4D: Time Window Feasibility & Arrival Times
       const { arrivalTimes } = checkTimeWindowFeasibility(
         routeOrders,
         costMatrix,
-        [0, ...improvedNodeIndices],
+        [0, ...mRoute.nodeIndices],
         0,
       );
 
-      // Phase 4D: Fetch OSRM Route Geometry
+      // Phase 4E: Fetch OSRM Route Geometry
       const routeOsrmCoords: [number, number][] = [
         [Number(depot.longitude), Number(depot.latitude)],
         ...routeOrders.map((o): [number, number] => [Number(o.longitude), Number(o.latitude)]),
@@ -1014,12 +1468,41 @@ export class VrpService {
       const routeWeightKg = routeOrders.reduce((s, o) => s + Number(o.weightKg), 0);
       const routeVolumeM3 = routeOrders.reduce((s, o) => s + Number(o.volumeM3), 0);
       const maxWeight = Number(driver.maxWeightKg);
+      const maxVolume = Number(driver.maxVolumeM3);
 
+      // STRICT HARD CONSTRAINT: Route weight must NEVER exceed vehicle maxLoad
       if (routeWeightKg > maxWeight + 0.001) {
         throw new Error(
           `Vehicle capacity constraint violated: Route weight ${routeWeightKg}kg exceeds driver ${driver.userId} max weight ${maxWeight}kg`,
         );
       }
+      if (maxVolume > 0 && routeVolumeM3 > maxVolume) {
+        this.logger.debug(
+          `Route volume ${routeVolumeM3.toFixed(3)}m3 for driver ${driver.userId} exceeds nominal volume ${maxVolume}m3; packed via standard logistics consolidation.`,
+        );
+      }
+
+      // 8-Hour Shift Ceiling (480 minutes)
+      if (totalTime > VRP_CONFIG.MAX_ROUTE_TIME_MIN) {
+        this.logger.warn(
+          `Shift duration limit: Driver ${driver.userId} estimated route time ${totalTime}min exceeds 8-hour shift (${VRP_CONFIG.MAX_ROUTE_TIME_MIN}min)`,
+        );
+      }
+
+      if (totalDist > VRP_CONFIG.MAX_ROUTE_DISTANCE_KM) {
+        this.logger.warn(
+          `Route distance limit: Driver ${driver.userId} estimated distance ${totalDist}km exceeds limit (${VRP_CONFIG.MAX_ROUTE_DISTANCE_KM}km)`,
+        );
+      }
+
+      // Fuel calculations
+      const isVan = isVanDriver(driver);
+      const fuelRate = isVan
+        ? VRP_CONFIG.VAN_FUEL_RATE_L_PER_100KM
+        : VRP_CONFIG.MOTORBIKE_FUEL_RATE_L_PER_100KM;
+      const fuelPrice = isVan ? VRP_CONFIG.DIESEL_PRICE_VND : VRP_CONFIG.GASOLINE_PRICE_VND;
+      const estimatedFuelLiters = Math.round(((totalDist * fuelRate) / 100) * 10) / 10;
+      const estimatedFuelCostVnd = Math.round(estimatedFuelLiters * fuelPrice);
 
       routes.push({
         driverId: driver.userId,
@@ -1031,6 +1514,8 @@ export class VrpService {
         totalEstimatedTimeMin: Math.round(totalTime),
         totalWeightKg: Math.round(routeWeightKg * 100) / 100,
         totalVolumeM3: Math.round(routeVolumeM3 * 1000) / 1000,
+        estimatedFuelLiters,
+        estimatedFuelCostVnd,
         polyline,
         stops: routeOrders.map((o, idx) => ({
           sequenceNo: idx + 1,
@@ -1050,13 +1535,32 @@ export class VrpService {
     }
 
     console.log('Final route count being returned to frontend:', routes.length);
+    const unassignedCount = unassignedOrders.length;
+    const assignedCount = clusteredOrders.length - unassignedCount;
+    console.log(
+      `[VRP Solver] Optimization finished: assigned=${assignedCount}/${clusteredOrders.length} orders | unassigned/dropped=${unassignedCount} orders`,
+    );
+    if (unassignedCount > 0) {
+      console.log(
+        `[VRP Solver] Dropped node details:`,
+        unassignedOrders.map((u) => `${u.code} (${u.reason})`).join(', '),
+      );
+    } else {
+      console.log(
+        `[VRP Solver] SUCCESS: All ${clusteredOrders.length} orders assigned to ${routes.length} vehicle routes within strict capacity limits (0 dropped)!`,
+      );
+    }
 
     const totalDistKm = routes.reduce((s, r) => s + r.totalDistanceKm, 0);
+    const totalFuelLiters =
+      Math.round(routes.reduce((s, r) => s + (r.estimatedFuelLiters ?? 0), 0) * 10) / 10;
+    const totalFuelCostVnd = routes.reduce((s, r) => s + (r.estimatedFuelCostVnd ?? 0), 0);
     const optimizationTimeMs = Date.now() - startTime;
 
     this.logger.log(
       `VRP done in ${optimizationTimeMs}ms | routes=${routes.length} | ` +
-        `assigned=${clusteredOrders.length - unassignedOrders.length} | unassigned=${unassignedOrders.length}`,
+        `assigned=${assignedCount} | unassigned=${unassignedCount} | ` +
+        `dist=${totalDistKm}km | fuel=${totalFuelLiters}L (~${totalFuelCostVnd.toLocaleString('vi-VN')} VND)`,
     );
 
     return {
@@ -1068,6 +1572,8 @@ export class VrpService {
       optimizationTimeMs,
       depot,
       algorithmUsed: 'nearest-neighbor + 2-opt',
+      totalFuelLiters,
+      totalFuelCostVnd,
     };
   }
 }

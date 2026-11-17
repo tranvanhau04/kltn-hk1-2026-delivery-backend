@@ -1,11 +1,12 @@
-import { Controller, Get, Post, Body, Param, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, HttpException, HttpStatus, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { TrackingLog } from '../entities/tracking-log.entity';
 import { Driver } from '../entities/driver.entity';
 import { Route } from '../entities/route.entity';
 import { Stop } from '../entities/stop.entity';
 import { User } from '../entities/user.entity';
+import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
 import { SimulationService } from './simulation.service';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -26,6 +27,9 @@ export class TrackingController {
     @InjectRepository(Stop) private readonly stopRepo: Repository<Stop>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     private readonly simulationService: SimulationService,
+    @Optional()
+    @InjectRepository(ProofOfDelivery)
+    private readonly podRepo?: Repository<ProofOfDelivery>,
   ) {}
 
   /**
@@ -215,6 +219,13 @@ export class TrackingController {
       order: { sequenceNo: 'ASC' },
     });
 
+    const stopIds = stops.map((s) => s.id);
+    let podMap = new Map<string, ProofOfDelivery>();
+    if (this.podRepo && stopIds.length > 0) {
+      const pods = await this.podRepo.findBy({ stopId: In(stopIds) });
+      podMap = new Map(pods.map((p) => [p.stopId, p]));
+    }
+
     let polyline: [number, number][] = [];
     if (route.polyline) {
       try {
@@ -235,46 +246,78 @@ export class TrackingController {
         status: route.status,
         polyline,
       },
-      stops: stops.map((s) => ({
-        id: s.id,
-        routeId: s.routeId,
-        orderId: s.orderId,
-        sequenceNo: s.sequenceNo,
-        status: s.status,
-        arrivedAt: s.arrivedAt,
-        order: s.order
-          ? {
-              id: s.order.id,
-              code: s.order.code,
-              receiverName: s.order.receiverName,
-              receiverPhone: s.order.receiverPhone,
-              deliveryAddress: s.order.deliveryAddress,
-              latitude: Number(s.order.latitude),
-              longitude: Number(s.order.longitude),
-              lat: Number(s.order.latitude),
-              lng: Number(s.order.longitude),
-              codAmount: Number(s.order.codAmount),
-              status: s.order.status,
-              createdAt: s.order.createdAt,
-            }
-          : null,
-      })),
+      stops: stops.map((s) => {
+        const pod = podMap.get(s.id);
+        const rescheduledDate = pod?.rescheduledDate ?? null;
+        const failureReason = pod?.failureReason ?? null;
+        const confirmedAt = pod?.confirmedAt ?? null;
+        return {
+          id: s.id,
+          routeId: s.routeId,
+          orderId: s.orderId,
+          sequenceNo: s.sequenceNo,
+          status: s.status,
+          arrivedAt: s.arrivedAt,
+          rescheduledDate,
+          failureReason,
+          confirmedAt,
+          pod: pod
+            ? {
+                id: pod.id,
+                stopId: pod.stopId,
+                failureReason: pod.failureReason,
+                rescheduledDate: pod.rescheduledDate,
+                confirmedAt: pod.confirmedAt,
+                photoUrl: pod.photoUrl,
+                codCollected: Number(pod.codCollected) || 0,
+              }
+            : null,
+          order: s.order
+            ? {
+                id: s.order.id,
+                code: s.order.code,
+                receiverName: s.order.receiverName,
+                receiverPhone: s.order.receiverPhone,
+                deliveryAddress: s.order.deliveryAddress,
+                latitude: Number(s.order.latitude),
+                longitude: Number(s.order.longitude),
+                lat: Number(s.order.latitude),
+                lng: Number(s.order.longitude),
+                codAmount: Number(s.order.codAmount),
+                status: s.order.status,
+                rescheduledDate,
+                failureReason,
+                confirmedAt,
+                createdAt: s.order.createdAt,
+              }
+            : null,
+        };
+      }),
       orders: stops
         .filter((s) => s.order)
-        .map((s) => ({
-          id: s.order.id,
-          code: s.order.code,
-          receiverName: s.order.receiverName,
-          receiverPhone: s.order.receiverPhone,
-          deliveryAddress: s.order.deliveryAddress,
-          latitude: Number(s.order.latitude),
-          longitude: Number(s.order.longitude),
-          codAmount: Number(s.order.codAmount),
-          status: s.order.status,
-          stopStatus: s.status,
-          sequenceNo: s.sequenceNo,
-          createdAt: s.order.createdAt,
-        })),
+        .map((s) => {
+          const pod = podMap.get(s.id);
+          const rescheduledDate = pod?.rescheduledDate ?? null;
+          const failureReason = pod?.failureReason ?? null;
+          const confirmedAt = pod?.confirmedAt ?? null;
+          return {
+            id: s.order.id,
+            code: s.order.code,
+            receiverName: s.order.receiverName,
+            receiverPhone: s.order.receiverPhone,
+            deliveryAddress: s.order.deliveryAddress,
+            latitude: Number(s.order.latitude),
+            longitude: Number(s.order.longitude),
+            codAmount: Number(s.order.codAmount),
+            status: s.order.status,
+            stopStatus: s.status,
+            sequenceNo: s.sequenceNo,
+            rescheduledDate,
+            failureReason,
+            confirmedAt,
+            createdAt: s.order.createdAt,
+          };
+        }),
     };
   }
 

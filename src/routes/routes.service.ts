@@ -16,6 +16,7 @@ import { Driver } from '../entities/driver.entity';
 import { Depot } from '../entities/depot.entity';
 import { User } from '../entities/user.entity';
 import { OrderStatusHistory } from '../entities/order-status-history.entity';
+import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
 import { TrackingGateway } from '../tracking/tracking.gateway';
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
@@ -84,6 +85,9 @@ export class RoutesService {
     @InjectRepository(OrderStatusHistory)
     private readonly historyRepo: Repository<OrderStatusHistory>,
     @Optional() private readonly trackingGateway?: TrackingGateway,
+    @Optional()
+    @InjectRepository(ProofOfDelivery)
+    private readonly podRepo?: Repository<ProofOfDelivery>,
   ) {}
 
   /**
@@ -383,6 +387,13 @@ export class RoutesService {
       order: { sequenceNo: 'ASC' },
     });
 
+    const stopIds = stops.map((s) => s.id);
+    let podMap = new Map<string, ProofOfDelivery>();
+    if (this.podRepo && stopIds.length > 0) {
+      const pods = await this.podRepo.findBy({ stopId: In(stopIds) });
+      podMap = new Map(pods.map((p) => [p.stopId, p]));
+    }
+
     let polyline: [number, number][] = [];
     if (route.polyline) {
       try {
@@ -404,29 +415,52 @@ export class RoutesService {
         polyline,
         createdAt: route.createdAt,
       },
-      stops: stops.map((s) => ({
-        id: s.id,
-        routeId: s.routeId,
-        orderId: s.orderId,
-        sequenceNo: s.sequenceNo,
-        status: s.status,
-        arrivedAt: s.arrivedAt,
-        order: s.order
-          ? {
-              id: s.order.id,
-              code: s.order.code,
-              receiverName: s.order.receiverName,
-              receiverPhone: s.order.receiverPhone,
-              deliveryAddress: s.order.deliveryAddress,
-              lat: Number(s.order.latitude),
-              lng: Number(s.order.longitude),
-              weightKg: Number(s.order.weightKg),
-              volumeM3: Number(s.order.volumeM3),
-              codAmount: Number(s.order.codAmount),
-              status: s.order.status,
-            }
-          : null,
-      })),
+      stops: stops.map((s) => {
+        const pod = podMap.get(s.id);
+        const rescheduledDate = pod?.rescheduledDate ?? null;
+        const failureReason = pod?.failureReason ?? null;
+        const confirmedAt = pod?.confirmedAt ?? null;
+        return {
+          id: s.id,
+          routeId: s.routeId,
+          orderId: s.orderId,
+          sequenceNo: s.sequenceNo,
+          status: s.status,
+          arrivedAt: s.arrivedAt,
+          rescheduledDate,
+          failureReason,
+          confirmedAt,
+          pod: pod
+            ? {
+                id: pod.id,
+                stopId: pod.stopId,
+                failureReason: pod.failureReason,
+                rescheduledDate: pod.rescheduledDate,
+                confirmedAt: pod.confirmedAt,
+                photoUrl: pod.photoUrl,
+                codCollected: Number(pod.codCollected) || 0,
+              }
+            : null,
+          order: s.order
+            ? {
+                id: s.order.id,
+                code: s.order.code,
+                receiverName: s.order.receiverName,
+                receiverPhone: s.order.receiverPhone,
+                deliveryAddress: s.order.deliveryAddress,
+                lat: Number(s.order.latitude),
+                lng: Number(s.order.longitude),
+                weightKg: Number(s.order.weightKg),
+                volumeM3: Number(s.order.volumeM3),
+                codAmount: Number(s.order.codAmount),
+                status: s.order.status,
+                rescheduledDate,
+                failureReason,
+                confirmedAt,
+              }
+            : null,
+        };
+      }),
     };
   }
 
@@ -438,11 +472,18 @@ export class RoutesService {
     if (!route) throw new NotFoundException(`Route not found: ${id}`);
 
     const [stops, driverUser, driver, depot] = await Promise.all([
-      this.stopRepo.find({ where: { routeId: id }, order: { sequenceNo: 'ASC' } }),
+      this.stopRepo.find({ where: { routeId: id }, relations: ['order'], order: { sequenceNo: 'ASC' } }),
       this.userRepo.findOne({ where: { id: route.driverId } }),
       this.driverRepo.findOne({ where: { userId: route.driverId } }),
       this.depotRepo.findOne({ where: { id: route.depotId } }),
     ]);
+
+    const stopIds = stops.map((s) => s.id);
+    let podMap = new Map<string, ProofOfDelivery>();
+    if (this.podRepo && stopIds.length > 0) {
+      const pods = await this.podRepo.findBy({ stopId: In(stopIds) });
+      podMap = new Map(pods.map((p) => [p.stopId, p]));
+    }
 
     let polyline: [number, number][] = [];
     if (route.polyline) {
@@ -479,28 +520,51 @@ export class RoutesService {
         vehicleType: driver?.vehicleType ?? '',
         currentShiftStatus: driver?.currentShiftStatus ?? '',
       },
-      stops: stops.map((s) => ({
-        id: s.id,
-        sequenceNo: s.sequenceNo,
-        orderId: s.orderId,
-        status: s.status,
-        arrivedAt: s.arrivedAt,
-        order: s.order
-          ? {
-              id: s.order.id,
-              code: s.order.code,
-              receiverName: s.order.receiverName,
-              receiverPhone: s.order.receiverPhone,
-              deliveryAddress: s.order.deliveryAddress,
-              latitude: Number(s.order.latitude),
-              longitude: Number(s.order.longitude),
-              weightKg: Number(s.order.weightKg),
-              volumeM3: Number(s.order.volumeM3),
-              codAmount: Number(s.order.codAmount),
-              status: s.order.status,
-            }
-          : null,
-      })),
+      stops: stops.map((s) => {
+        const pod = podMap.get(s.id);
+        const rescheduledDate = pod?.rescheduledDate ?? null;
+        const failureReason = pod?.failureReason ?? null;
+        const confirmedAt = pod?.confirmedAt ?? null;
+        return {
+          id: s.id,
+          sequenceNo: s.sequenceNo,
+          orderId: s.orderId,
+          status: s.status,
+          arrivedAt: s.arrivedAt,
+          rescheduledDate,
+          failureReason,
+          confirmedAt,
+          pod: pod
+            ? {
+                id: pod.id,
+                stopId: pod.stopId,
+                failureReason: pod.failureReason,
+                rescheduledDate: pod.rescheduledDate,
+                confirmedAt: pod.confirmedAt,
+                photoUrl: pod.photoUrl,
+                codCollected: Number(pod.codCollected) || 0,
+              }
+            : null,
+          order: s.order
+            ? {
+                id: s.order.id,
+                code: s.order.code,
+                receiverName: s.order.receiverName,
+                receiverPhone: s.order.receiverPhone,
+                deliveryAddress: s.order.deliveryAddress,
+                latitude: Number(s.order.latitude),
+                longitude: Number(s.order.longitude),
+                weightKg: Number(s.order.weightKg),
+                volumeM3: Number(s.order.volumeM3),
+                codAmount: Number(s.order.codAmount),
+                status: s.order.status,
+                rescheduledDate,
+                failureReason,
+                confirmedAt,
+              }
+            : null,
+        };
+      }),
     };
   }
 

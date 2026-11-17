@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -26,6 +27,114 @@ export class DriversController {
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   findAllUnpaginated(): Promise<Driver[]> {
     return this.driversService.findAllUnpaginated();
+  }
+
+  /**
+   * GET /api/drivers/me/earnings
+   * View driver earnings & 15% platform commission breakdown (day, week, month).
+   * Access: ADMIN, DISPATCHER, DRIVER.
+   */
+  @Get('me/earnings')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  getMyEarnings(@CurrentUser() currentUser: JwtPayload) {
+    return this.driversService.getEarnings(currentUser.sub);
+  }
+
+  /**
+   * GET /api/drivers/me/account-summary
+   * View driver account summary, depot, assigned zones, and monthly performance stats.
+   * Access: ADMIN, DISPATCHER, DRIVER.
+   */
+  @Get('me/account-summary')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  getMyAccountSummary(@CurrentUser() currentUser: JwtPayload) {
+    return this.driversService.getAccountSummary(currentUser.sub);
+  }
+
+  /**
+   * GET /api/drivers/me/shift-history
+   * View shift and COD reconciliation history.
+   * Access: ADMIN, DISPATCHER, DRIVER.
+   */
+  @Get('me/shift-history')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  getMyShiftHistory(@CurrentUser() currentUser: JwtPayload) {
+    return this.driversService.getShiftHistory(currentUser.sub);
+  }
+
+  /**
+   * GET /api/drivers/:userId/account-summary
+   */
+  @Get(':userId/account-summary')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  getAccountSummaryByUserId(
+    @Param('userId') userId: string,
+    @CurrentUser() currentUser: JwtPayload,
+  ) {
+    if (currentUser.role === UserRole.DRIVER && currentUser.sub !== userId) {
+      throw new ForbiddenException('Drivers are only allowed to view their own account summary');
+    }
+    return this.driversService.getAccountSummary(userId);
+  }
+
+  /**
+   * GET /api/drivers/:userId/shift-history
+   */
+  @Get(':userId/shift-history')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  getShiftHistoryByUserId(
+    @Param('userId') userId: string,
+    @CurrentUser() currentUser: JwtPayload,
+  ) {
+    if (currentUser.role === UserRole.DRIVER && currentUser.sub !== userId) {
+      throw new ForbiddenException('Drivers are only allowed to view their own shift history');
+    }
+    return this.driversService.getShiftHistory(userId);
+  }
+
+  /**
+   * GET /api/drivers/:userId/earnings
+   * View earnings & commission breakdown for a specific driver.
+   * Access: ADMIN, DISPATCHER, DRIVER (self only).
+   */
+  @Get(':userId/earnings')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  getEarningsByUserId(
+    @Param('userId') userId: string,
+    @CurrentUser() currentUser: JwtPayload,
+  ) {
+    if (currentUser.role === UserRole.DRIVER && currentUser.sub !== userId) {
+      throw new ForbiddenException('Drivers are only allowed to view their own earnings');
+    }
+    return this.driversService.getEarnings(userId);
+  }
+
+  /**
+   * GET /api/drivers/me/fleet-info
+   * View vehicle specifications, assigned depot, operational zones, and shift load metrics for authenticated driver.
+   * Access: ADMIN, DISPATCHER, DRIVER.
+   */
+  @Get('me/fleet-info')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  getMyFleetInfo(@CurrentUser() currentUser: JwtPayload) {
+    return this.driversService.getFleetInfo(currentUser.sub);
+  }
+
+  /**
+   * GET /api/drivers/:userId/fleet-info
+   * View vehicle specifications, assigned depot, operational zones, and shift load metrics for a specific driver.
+   * Access: ADMIN, DISPATCHER, DRIVER (self only).
+   */
+  @Get(':userId/fleet-info')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  getFleetInfoByUserId(
+    @Param('userId') userId: string,
+    @CurrentUser() currentUser: JwtPayload,
+  ) {
+    if (currentUser.role === UserRole.DRIVER && currentUser.sub !== userId) {
+      throw new ForbiddenException('Drivers are only allowed to view their own fleet info');
+    }
+    return this.driversService.getFleetInfo(userId);
   }
 
   /**
