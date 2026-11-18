@@ -5,6 +5,7 @@ import { DriversService } from './drivers.service';
 import { Driver, DriverShiftStatus } from '../entities/driver.entity';
 import { User } from '../entities/user.entity';
 import { Depot } from '../entities/depot.entity';
+import { Region } from '../entities/region.entity';
 import { Zone } from '../entities/zone.entity';
 import { ZoneDriver } from '../entities/zone-driver.entity';
 import { Order, OrderStatus } from '../entities/order.entity';
@@ -32,7 +33,7 @@ describe('DriversService - getFleetInfo', () => {
       longitude: 106.687498,
       capacity: 1200,
       regionId: 'region-1',
-      region: {} as any,
+      region: {} as unknown as Region,
     },
   };
 

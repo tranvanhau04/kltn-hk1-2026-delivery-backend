@@ -472,7 +472,11 @@ export class RoutesService {
     if (!route) throw new NotFoundException(`Route not found: ${id}`);
 
     const [stops, driverUser, driver, depot] = await Promise.all([
-      this.stopRepo.find({ where: { routeId: id }, relations: ['order'], order: { sequenceNo: 'ASC' } }),
+      this.stopRepo.find({
+        where: { routeId: id },
+        relations: ['order'],
+        order: { sequenceNo: 'ASC' },
+      }),
       this.userRepo.findOne({ where: { id: route.driverId } }),
       this.driverRepo.findOne({ where: { userId: route.driverId } }),
       this.depotRepo.findOne({ where: { id: route.depotId } }),

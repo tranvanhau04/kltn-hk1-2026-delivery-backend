@@ -912,13 +912,23 @@ function optimizeInterRoute(
               const testNodesA = [...rA.nodeIndices];
               testNodesA[i] = nodeB;
               const testOrdersA = testNodesA.map((ni) => nodeToOrder.get(ni)!);
-              const twA = checkTimeWindowFeasibility(testOrdersA, costMatrix, [0, ...testNodesA], 0);
+              const twA = checkTimeWindowFeasibility(
+                testOrdersA,
+                costMatrix,
+                [0, ...testNodesA],
+                0,
+              );
               if (!twA.feasible) continue;
 
               const testNodesB = [...rB.nodeIndices];
               testNodesB[j] = nodeA;
               const testOrdersB = testNodesB.map((ni) => nodeToOrder.get(ni)!);
-              const twB = checkTimeWindowFeasibility(testOrdersB, costMatrix, [0, ...testNodesB], 0);
+              const twB = checkTimeWindowFeasibility(
+                testOrdersB,
+                costMatrix,
+                [0, ...testNodesB],
+                0,
+              );
               if (!twB.feasible) continue;
 
               // Perform swap
@@ -1171,7 +1181,6 @@ export class VrpService {
       if (assignment.orders.length === 0) continue;
       const driver = assignment.driver;
       const maxW = Number(driver.maxWeightKg);
-      const isVan = isVanDriver(driver);
 
       // Compute cluster centroid
       const cLat =

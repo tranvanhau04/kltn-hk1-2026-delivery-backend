@@ -35,19 +35,13 @@ export class AuthController {
 
   @Patch('change-password')
   @HttpCode(HttpStatus.OK)
-  async changePasswordPatch(
-    @CurrentUser() user: JwtPayload,
-    @Body() dto: ChangePasswordDto,
-  ) {
+  async changePasswordPatch(@CurrentUser() user: JwtPayload, @Body() dto: ChangePasswordDto) {
     return this.authService.changePassword(user.sub, dto.currentPassword, dto.newPassword);
   }
 
   @Post('change-password')
   @HttpCode(HttpStatus.OK)
-  async changePasswordPost(
-    @CurrentUser() user: JwtPayload,
-    @Body() dto: ChangePasswordDto,
-  ) {
+  async changePasswordPost(@CurrentUser() user: JwtPayload, @Body() dto: ChangePasswordDto) {
     return this.authService.changePassword(user.sub, dto.currentPassword, dto.newPassword);
   }
 

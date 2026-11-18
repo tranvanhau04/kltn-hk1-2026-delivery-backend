@@ -127,8 +127,7 @@ export class DriversService {
         const weight = order?.weightKg ? Number(order.weightKg) : 0;
         totalShiftWeightKg += weight;
 
-        const isDelivered =
-          stop.status === 'COMPLETED' || order?.status === OrderStatus.DELIVERED;
+        const isDelivered = stop.status === 'COMPLETED' || order?.status === OrderStatus.DELIVERED;
         const isFailed =
           stop.status === 'FAILED' ||
           stop.status === 'SKIPPED' ||
@@ -874,7 +873,8 @@ export class DriversService {
 
     const buildSummary = (items: BreakdownItem[]) => {
       const deliveredOrdersCount = items.length;
-      const grossEarnings = Math.round(items.reduce((sum, item) => sum + item.grossFee, 0) / 1000) * 1000;
+      const grossEarnings =
+        Math.round(items.reduce((sum, item) => sum + item.grossFee, 0) / 1000) * 1000;
       const commissionRate = 15;
       const platformFee = Math.round((grossEarnings * 0.15) / 1000) * 1000;
       const netEarnings = grossEarnings - platformFee;

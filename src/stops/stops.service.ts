@@ -511,7 +511,7 @@ export class StopsService {
    * GET /api/stops/:id
    * Chi tiết điểm dừng kèm đơn hàng và ProofOfDelivery (nếu có).
    */
-  async getStopDetail(stopId: string, user: JwtPayload) {
+  async getStopDetail(stopId: string) {
     const stop = await this.stopRepo.findOne({
       where: { id: stopId },
       relations: ['order'],

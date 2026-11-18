@@ -75,7 +75,7 @@ export class StopsController {
    */
   @Get(':id')
   @Roles(UserRole.DRIVER, UserRole.DISPATCHER, UserRole.ADMIN)
-  getStopDetail(@Param('id') id: string, @CurrentUser() user: JwtPayload) {
-    return this.stopsService.getStopDetail(id, user);
+  getStopDetail(@Param('id') id: string) {
+    return this.stopsService.getStopDetail(id);
   }
 }

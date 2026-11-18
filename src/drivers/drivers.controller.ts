@@ -82,10 +82,7 @@ export class DriversController {
    */
   @Get(':userId/shift-history')
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
-  getShiftHistoryByUserId(
-    @Param('userId') userId: string,
-    @CurrentUser() currentUser: JwtPayload,
-  ) {
+  getShiftHistoryByUserId(@Param('userId') userId: string, @CurrentUser() currentUser: JwtPayload) {
     if (currentUser.role === UserRole.DRIVER && currentUser.sub !== userId) {
       throw new ForbiddenException('Drivers are only allowed to view their own shift history');
     }
@@ -99,10 +96,7 @@ export class DriversController {
    */
   @Get(':userId/earnings')
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
-  getEarningsByUserId(
-    @Param('userId') userId: string,
-    @CurrentUser() currentUser: JwtPayload,
-  ) {
+  getEarningsByUserId(@Param('userId') userId: string, @CurrentUser() currentUser: JwtPayload) {
     if (currentUser.role === UserRole.DRIVER && currentUser.sub !== userId) {
       throw new ForbiddenException('Drivers are only allowed to view their own earnings');
     }
@@ -127,10 +121,7 @@ export class DriversController {
    */
   @Get(':userId/fleet-info')
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
-  getFleetInfoByUserId(
-    @Param('userId') userId: string,
-    @CurrentUser() currentUser: JwtPayload,
-  ) {
+  getFleetInfoByUserId(@Param('userId') userId: string, @CurrentUser() currentUser: JwtPayload) {
     if (currentUser.role === UserRole.DRIVER && currentUser.sub !== userId) {
       throw new ForbiddenException('Drivers are only allowed to view their own fleet info');
     }

@@ -14,17 +14,7 @@ import { DriversService } from './drivers.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      Driver,
-      User,
-      Depot,
-      Zone,
-      ZoneDriver,
-      Order,
-      Shift,
-      Route,
-      Stop,
-    ]),
+    TypeOrmModule.forFeature([Driver, User, Depot, Zone, ZoneDriver, Order, Shift, Route, Stop]),
   ],
   controllers: [DriversController],
   providers: [DriversService],
