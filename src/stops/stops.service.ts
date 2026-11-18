@@ -89,10 +89,10 @@ export class StopsService {
       throw new ForbiddenException(`Bạn không được phân công lộ trình này`);
     }
 
-    // Terminal states cannot be marked ARRIVED
-    if (['COMPLETED', 'FAILED', 'SKIPPED'].includes(stop.status)) {
+    // Terminal state COMPLETED cannot be marked ARRIVED
+    if (stop.status === 'COMPLETED') {
       throw new BadRequestException(
-        `Điểm dừng đã ở trạng thái ${stop.status}, không thể chuyển sang ARRIVED`,
+        `Điểm dừng đã ở trạng thái COMPLETED, không thể chuyển sang ARRIVED`,
       );
     }
 
@@ -111,6 +111,28 @@ export class StopsService {
     stop.status = 'ARRIVED';
     stop.arrivedAt = new Date();
     await this.stopRepo.save(stop);
+
+    // KLTN: Nếu đơn hàng trước đó đang ở trạng thái RESCHEDULED, FAILED hoặc ASSIGNED,
+    // khi tài xế đã đến nơi giao lại, cập nhật đơn hàng sang IN_TRANSIT để tiếp tục quy trình giao
+    if (
+      stop.order &&
+      [OrderStatus.RESCHEDULED, OrderStatus.FAILED, OrderStatus.ASSIGNED].includes(
+        stop.order.status,
+      )
+    ) {
+      stop.order.status = OrderStatus.IN_TRANSIT;
+      stop.order.updatedAt = new Date();
+      await this.orderRepo.save(stop.order);
+
+      const history = this.historyRepo.create({
+        id: uuidv4(),
+        orderId: stop.order.id,
+        status: OrderStatus.IN_TRANSIT,
+        note: 'Tài xế đã có mặt tại điểm giao hàng (đang giao lại)',
+        createdAt: new Date(),
+      });
+      await this.historyRepo.save(history);
+    }
 
     return {
       success: true,
@@ -169,11 +191,6 @@ export class StopsService {
     }
 
     const existingPod = await this.podRepo.findOne({ where: { stopId } });
-    if (existingPod) {
-      throw new ConflictException(
-        'Minh chứng giao hàng (POD) cho điểm dừng này đã tồn tại trong hệ thống.',
-      );
-    }
 
     // 4. Validate order and COD amount
     const order = stop.order;
@@ -203,17 +220,27 @@ export class StopsService {
     await queryRunner.startTransaction();
 
     try {
-      // 5.1. Create ProofOfDelivery record (Lưu Object Key: pod/pod-xxx.jpg)
-      const pod = queryRunner.manager.create(ProofOfDelivery, {
-        id: uuidv4(),
-        stopId: stop.id,
-        photoUrl: photoKey,
-        codCollected: finalCod,
-        failureReason: null,
-        rescheduledDate: null,
-        confirmedAt: new Date(),
-      });
-      await queryRunner.manager.save(pod);
+      // 5.1. Create or Update ProofOfDelivery record (Lưu Object Key: pod/pod-xxx.jpg)
+      let pod: ProofOfDelivery;
+      if (existingPod) {
+        existingPod.photoUrl = photoKey;
+        existingPod.codCollected = finalCod;
+        existingPod.failureReason = null;
+        existingPod.rescheduledDate = null;
+        existingPod.confirmedAt = new Date();
+        pod = await queryRunner.manager.save(existingPod);
+      } else {
+        pod = queryRunner.manager.create(ProofOfDelivery, {
+          id: uuidv4(),
+          stopId: stop.id,
+          photoUrl: photoKey,
+          codCollected: finalCod,
+          failureReason: null,
+          rescheduledDate: null,
+          confirmedAt: new Date(),
+        });
+        await queryRunner.manager.save(pod);
+      }
 
       // 5.2. Update Stop: status = 'COMPLETED'
       stop.status = 'COMPLETED';
@@ -358,17 +385,15 @@ export class StopsService {
       throw new ForbiddenException(`Bạn không có quyền cập nhật điểm dừng này`);
     }
 
-    // 3. State & Idempotency protection
-    if (['COMPLETED', 'FAILED', 'SKIPPED'].includes(stop.status)) {
+    // 3. State & Idempotency protection: Điểm dừng đã hoàn thành không thể chuyển trạng thái
+    if (stop.status === 'COMPLETED') {
+      await this.safeDeleteFile(file?.path);
       throw new ConflictException(
-        `Điểm dừng đã ở trạng thái ${stop.status}, không thể chuyển sang ${dto.action}`,
+        `Điểm dừng đã hoàn thành thành công, không thể chuyển sang ${dto.action}`,
       );
     }
 
     const existingPod = await this.podRepo.findOne({ where: { stopId } });
-    if (existingPod) {
-      throw new ConflictException('Điểm dừng này đã có minh chứng / kết quả xử lý trước đó.');
-    }
 
     const order = stop.order;
     if (!order) {
@@ -390,17 +415,27 @@ export class StopsService {
     await queryRunner.startTransaction();
 
     try {
-      // 4.1. Create ProofOfDelivery record (Failure Evidence - Lưu Object Key)
-      const pod = queryRunner.manager.create(ProofOfDelivery, {
-        id: uuidv4(),
-        stopId: stop.id,
-        photoUrl: photoKey,
-        codCollected: 0,
-        failureReason: dto.failureReason,
-        rescheduledDate,
-        confirmedAt: new Date(),
-      });
-      await queryRunner.manager.save(pod);
+      // 4.1. Create or Update ProofOfDelivery record (Failure Evidence - Lưu Object Key)
+      let pod: ProofOfDelivery;
+      if (existingPod) {
+        if (photoKey) existingPod.photoUrl = photoKey;
+        existingPod.codCollected = 0;
+        existingPod.failureReason = dto.failureReason;
+        existingPod.rescheduledDate = rescheduledDate;
+        existingPod.confirmedAt = new Date();
+        pod = await queryRunner.manager.save(existingPod);
+      } else {
+        pod = queryRunner.manager.create(ProofOfDelivery, {
+          id: uuidv4(),
+          stopId: stop.id,
+          photoUrl: photoKey,
+          codCollected: 0,
+          failureReason: dto.failureReason,
+          rescheduledDate,
+          confirmedAt: new Date(),
+        });
+        await queryRunner.manager.save(pod);
+      }
 
       // 4.2. Update Stop status
       const newStopStatus = dto.action === 'RESCHEDULED' ? 'SKIPPED' : 'FAILED';
@@ -470,5 +505,69 @@ export class StopsService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  /**
+   * GET /api/stops/:id
+   * Chi tiết điểm dừng kèm đơn hàng và ProofOfDelivery (nếu có).
+   */
+  async getStopDetail(stopId: string) {
+    const stop = await this.stopRepo.findOne({
+      where: { id: stopId },
+      relations: ['order'],
+    });
+
+    if (!stop) {
+      throw new NotFoundException(`Không tìm thấy điểm dừng với id=${stopId}`);
+    }
+
+    const pod = await this.podRepo.findOne({ where: { stopId } });
+    const rescheduledDate = pod?.rescheduledDate ?? null;
+    const failureReason = pod?.failureReason ?? null;
+    const confirmedAt = pod?.confirmedAt ?? null;
+
+    return {
+      success: true,
+      data: {
+        id: stop.id,
+        routeId: stop.routeId,
+        orderId: stop.orderId,
+        sequenceNo: stop.sequenceNo,
+        status: stop.status,
+        arrivedAt: stop.arrivedAt,
+        rescheduledDate,
+        failureReason,
+        confirmedAt,
+        pod: pod
+          ? {
+              id: pod.id,
+              stopId: pod.stopId,
+              failureReason: pod.failureReason,
+              rescheduledDate: pod.rescheduledDate,
+              confirmedAt: pod.confirmedAt,
+              photoUrl: pod.photoUrl,
+              codCollected: Number(pod.codCollected) || 0,
+            }
+          : null,
+        order: stop.order
+          ? {
+              id: stop.order.id,
+              code: stop.order.code,
+              receiverName: stop.order.receiverName,
+              receiverPhone: stop.order.receiverPhone,
+              deliveryAddress: stop.order.deliveryAddress,
+              latitude: Number(stop.order.latitude),
+              longitude: Number(stop.order.longitude),
+              weightKg: Number(stop.order.weightKg),
+              volumeM3: Number(stop.order.volumeM3),
+              codAmount: Number(stop.order.codAmount),
+              status: stop.order.status,
+              rescheduledDate,
+              failureReason,
+              confirmedAt,
+            }
+          : null,
+      },
+    };
   }
 }

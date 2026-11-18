@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository, DataSource } from 'typeorm';
@@ -13,6 +14,7 @@ import { Route } from '../entities/route.entity';
 import { Stop } from '../entities/stop.entity';
 import { OrderStatus } from '../entities/order.entity';
 import { Depot } from '../entities/depot.entity';
+import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
 import { User } from '../entities/user.entity';
 import { OpenShiftDto } from './dto/open-shift.dto';
 import { CloseShiftDto } from './dto/close-shift.dto';
@@ -45,6 +47,10 @@ export class ShiftsService {
     private readonly depotRepo: Repository<Depot>,
 
     private readonly dataSource: DataSource,
+
+    @Optional()
+    @InjectRepository(ProofOfDelivery)
+    private readonly podRepo?: Repository<ProofOfDelivery>,
   ) {}
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -293,6 +299,13 @@ export class ShiftsService {
       relations: ['order'],
     });
 
+    const stopIds = stops.map((s) => s.id);
+    let podMap = new Map<string, ProofOfDelivery>();
+    if (this.podRepo && stopIds.length > 0) {
+      const pods = await this.podRepo.findBy({ stopId: In(stopIds) });
+      podMap = new Map(pods.map((p) => [p.stopId, p]));
+    }
+
     // Load depot
     const depot = await this.depotRepo.findOne({ where: { id: route.depotId } });
 
@@ -323,27 +336,50 @@ export class ShiftsService {
               longitude: Number(depot.longitude),
             }
           : null,
-        stops: stops.map((s) => ({
-          id: s.id,
-          sequenceNo: s.sequenceNo,
-          status: s.status,
-          arrivedAt: s.arrivedAt ?? null,
-          order: s.order
-            ? {
-                id: s.order.id,
-                code: s.order.code,
-                receiverName: s.order.receiverName,
-                receiverPhone: s.order.receiverPhone,
-                deliveryAddress: s.order.deliveryAddress,
-                latitude: Number(s.order.latitude),
-                longitude: Number(s.order.longitude),
-                weightKg: Number(s.order.weightKg),
-                volumeM3: Number(s.order.volumeM3),
-                codAmount: Number(s.order.codAmount),
-                status: s.order.status,
-              }
-            : null,
-        })),
+        stops: stops.map((s) => {
+          const pod = podMap.get(s.id);
+          const rescheduledDate = pod?.rescheduledDate ?? null;
+          const failureReason = pod?.failureReason ?? null;
+          const confirmedAt = pod?.confirmedAt ?? null;
+          return {
+            id: s.id,
+            sequenceNo: s.sequenceNo,
+            status: s.status,
+            arrivedAt: s.arrivedAt ?? null,
+            rescheduledDate,
+            failureReason,
+            confirmedAt,
+            pod: pod
+              ? {
+                  id: pod.id,
+                  stopId: pod.stopId,
+                  failureReason: pod.failureReason,
+                  rescheduledDate: pod.rescheduledDate,
+                  confirmedAt: pod.confirmedAt,
+                  photoUrl: pod.photoUrl,
+                  codCollected: Number(pod.codCollected) || 0,
+                }
+              : null,
+            order: s.order
+              ? {
+                  id: s.order.id,
+                  code: s.order.code,
+                  receiverName: s.order.receiverName,
+                  receiverPhone: s.order.receiverPhone,
+                  deliveryAddress: s.order.deliveryAddress,
+                  latitude: Number(s.order.latitude),
+                  longitude: Number(s.order.longitude),
+                  weightKg: Number(s.order.weightKg),
+                  volumeM3: Number(s.order.volumeM3),
+                  codAmount: Number(s.order.codAmount),
+                  status: s.order.status,
+                  rescheduledDate,
+                  failureReason,
+                  confirmedAt,
+                }
+              : null,
+          };
+        }),
       },
     };
   }

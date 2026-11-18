@@ -10,6 +10,7 @@ import { Driver } from '../entities/driver.entity';
 import { Route } from '../entities/route.entity';
 import { Stop } from '../entities/stop.entity';
 import { User } from '../entities/user.entity';
+import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
 import { AuthModule } from '../auth/auth.module';
 
 /**
@@ -21,7 +22,7 @@ import { AuthModule } from '../auth/auth.module';
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([TrackingLog, Shift, Driver, Route, Stop, User]),
+    TypeOrmModule.forFeature([TrackingLog, Shift, Driver, Route, Stop, User, ProofOfDelivery]),
     AuthModule, // provides JwtService for TrackingGateway JWT verification
   ],
   controllers: [TrackingController],

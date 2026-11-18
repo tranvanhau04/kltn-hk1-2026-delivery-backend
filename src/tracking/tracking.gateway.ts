@@ -185,12 +185,13 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
    *   6. Return acknowledgement to driver
    */
   @UseGuards(WsThrottlerGuard)
-  @Throttle({ default: { limit: 20, ttl: 60000 }, ws: { limit: 20, ttl: 60000 } })
+  @Throttle({ default: { limit: 120, ttl: 60000 }, ws: { limit: 120, ttl: 60000 } })
   @SubscribeMessage('update_location')
   async handleUpdateLocation(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: UpdateLocationPayload,
   ): Promise<{ success: boolean; message?: string }> {
+    console.log('⚙️ Backend Received:', payload);
     const user = (client as AuthenticatedSocket).user;
 
     // Guard: must be authenticated
@@ -264,7 +265,7 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       `[WS] DRIVER ${driverId} location saved: (${latitude}, ${longitude}), shiftId=${resolvedShiftId}`,
     );
 
-    // Broadcast to dispatchers room
+    // Broadcast to dispatchers room and global web listeners
     const broadcastPayload = {
       driverId,
       fullName: userRecord?.fullName ?? 'Unknown Driver',
@@ -276,7 +277,9 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
       trackingLogId: savedLog.id,
     };
 
+    console.log('⚙️ Backend Broadcasting to Web...', broadcastPayload);
     this.server.to('dispatchers').emit('driver_location_updated', broadcastPayload);
+    this.server.emit('driver_location_updated', broadcastPayload);
 
     this.logger.log(
       `[WS] Broadcast driver_location_updated → dispatchers (driver: ${driverId}, lat: ${latitude}, lng: ${longitude})`,
