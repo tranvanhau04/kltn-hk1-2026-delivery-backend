@@ -412,16 +412,18 @@ describe('ReportsService', () => {
         codCollected: 1000000,
         codSubmitted: 0,
         reconciledAt: null,
+        reconciledBy: null,
         driver: { userId: 'driver-1', currentShiftStatus: DriverShiftStatus.ONLINE_READY },
-      };
+      } as unknown as Shift;
       const shift2 = {
         id: 'shift-2',
         status: ShiftStatus.PENDING_SETTLEMENT,
         codCollected: 2000000,
         codSubmitted: 2000000,
         reconciledAt: null,
+        reconciledBy: null,
         driver: { userId: 'driver-2', currentShiftStatus: DriverShiftStatus.ONLINE_READY },
-      };
+      } as unknown as Shift;
 
       mockEntityManager.find.mockResolvedValue([shift1, shift2]);
       mockEntityManager.save.mockResolvedValue([shift1, shift2]);
