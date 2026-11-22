@@ -1,11 +1,13 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, In } from 'typeorm';
 import { Order, OrderStatus } from '../entities/order.entity';
 import { Shift, ShiftStatus } from '../entities/shift.entity';
 import { Driver, DriverShiftStatus } from '../entities/driver.entity';
 import { ReconcileShiftDto } from './dto/reconcile-shift.dto';
+import { BulkReconcileShiftsDto } from './dto/bulk-reconcile-shifts.dto';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { S3Service } from '../s3/s3.service';
 import * as ExcelJS from 'exceljs';
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
 
@@ -19,6 +21,7 @@ export class ReportsService {
     @InjectRepository(Driver)
     private readonly driverRepo: Repository<Driver>,
     private readonly dataSource: DataSource,
+    private readonly s3Service: S3Service,
   ) {}
 
   private getDateRange(period: 'week' | 'month' | 'custom', startDate?: string, endDate?: string) {
@@ -261,6 +264,255 @@ export class ReportsService {
         success: true,
         message: `Duyệt đối soát COD thành công${discrepancyMsg}`,
         shift,
+      };
+    });
+  }
+
+  /**
+   * GET /reports/shifts/:id
+   * Lấy chi tiết ca làm việc: thông tin tài xế, dòng tiền COD, danh sách đơn hàng, ảnh POD
+   */
+  async getShiftDetail(shiftId: string) {
+    // 1. Lấy shift + driver relation
+    const shift = await this.shiftRepo.findOne({
+      where: { id: shiftId },
+      relations: ['driver'],
+    });
+
+    if (!shift) {
+      throw new NotFoundException('Không tìm thấy ca làm việc');
+    }
+
+    // 2. Lấy tên thật của tài xế từ bảng users
+    const userRow = await this.dataSource.query<{ full_name: string; phone: string }[]>(
+      `SELECT full_name, phone FROM users WHERE id = ? LIMIT 1`,
+      [shift.driverId],
+    );
+    const driverFullName =
+      userRow?.[0]?.full_name ||
+      (shift.driverId ? `Tài xế #${shift.driverId.slice(0, 8)}` : 'Chưa phân công');
+    const driverPhone = userRow?.[0]?.phone || null;
+
+    // 3. Lấy route liên kết với ca này (một ca có thể có nhiều route, lấy route gần nhất)
+    const routeRow = await this.dataSource.query<
+      {
+        id: string;
+        total_distance_km: number;
+        total_estimated_time_min: number;
+        status: string;
+      }[]
+    >(
+      `SELECT id, total_distance_km, total_estimated_time_min, status
+       FROM routes WHERE shift_id = ? ORDER BY created_at DESC LIMIT 1`,
+      [shiftId],
+    );
+    const route = routeRow?.[0] || null;
+
+    // 4. Lấy danh sách stops + order + POD nếu có route
+    const stopsDetail: Array<{
+      stopId: string;
+      sequenceNo: number;
+      status: string;
+      arrivedAt: Date | null;
+      orderId: string;
+      orderCode: string;
+      receiverName: string;
+      receiverPhone: string;
+      deliveryAddress: string;
+      codAmount: number;
+      pod: {
+        photoUrl: string | null;
+        codCollected: number;
+        failureReason: string | null;
+        confirmedAt: Date | null;
+      } | null;
+    }> = [];
+
+    let totalOrders = 0;
+    let deliveredCount = 0;
+    let failedCount = 0;
+
+    if (route) {
+      const rawStops = await this.dataSource.query<
+        {
+          stop_id: string;
+          sequence_no: number;
+          stop_status: string;
+          arrived_at: Date | null;
+          order_id: string;
+          order_code: string;
+          receiver_name: string;
+          receiver_phone: string;
+          delivery_address: string;
+          cod_amount: number;
+          pod_id: string | null;
+          pod_photo_url: string | null;
+          pod_cod_collected: number | null;
+          pod_failure_reason: string | null;
+          pod_confirmed_at: Date | null;
+        }[]
+      >(
+        `SELECT
+           s.id AS stop_id,
+           s.sequence_no,
+           s.status AS stop_status,
+           s.arrived_at,
+           o.id AS order_id,
+           o.code AS order_code,
+           o.receiver_name,
+           o.receiver_phone,
+           o.delivery_address,
+           COALESCE(o.cod_amount, 0) AS cod_amount,
+           p.id AS pod_id,
+           p.photo_url AS pod_photo_url,
+           p.cod_collected AS pod_cod_collected,
+           p.failure_reason AS pod_failure_reason,
+           p.confirmed_at AS pod_confirmed_at
+         FROM stops s
+         INNER JOIN orders o ON o.id = s.order_id
+         LEFT JOIN proof_of_deliveries p ON p.stop_id = s.id
+         WHERE s.route_id = ?
+         ORDER BY s.sequence_no ASC`,
+        [route.id],
+      );
+
+      totalOrders = rawStops.length;
+
+      for (const row of rawStops) {
+        if (row.stop_status === 'COMPLETED') deliveredCount++;
+        if (row.stop_status === 'FAILED') failedCount++;
+
+        // Sinh presigned URL cho ảnh POD
+        const presignedPhotoUrl = row.pod_photo_url
+          ? await this.s3Service.getPresignedUrl(row.pod_photo_url)
+          : null;
+
+        stopsDetail.push({
+          stopId: row.stop_id,
+          sequenceNo: row.sequence_no,
+          status: row.stop_status,
+          arrivedAt: row.arrived_at,
+          orderId: row.order_id,
+          orderCode: row.order_code || row.order_id.slice(0, 8).toUpperCase(),
+          receiverName: row.receiver_name,
+          receiverPhone: row.receiver_phone,
+          deliveryAddress: row.delivery_address,
+          codAmount: Number(row.cod_amount || 0),
+          pod: row.pod_id
+            ? {
+                photoUrl: presignedPhotoUrl,
+                codCollected: Number(row.pod_cod_collected || 0),
+                failureReason: row.pod_failure_reason,
+                confirmedAt: row.pod_confirmed_at,
+              }
+            : null,
+        });
+      }
+    }
+
+    const codCollected = Number(shift.codCollected || 0);
+    const codSubmitted = Number(shift.codSubmitted || 0);
+
+    return {
+      shiftId: shift.id,
+      driverId: shift.driverId,
+      driverName: driverFullName,
+      driverPhone,
+      licensePlate: shift.driver?.licensePlate || 'N/A',
+      vehicleType: shift.driver?.vehicleType || 'N/A',
+      startTime: shift.startTime,
+      endTime: shift.endTime,
+      status: shift.status,
+      startingCashCod: Number(shift.startingCashCod || 0),
+      codCollected,
+      codSubmitted,
+      codDifference: codCollected - codSubmitted,
+      reconciledBy: shift.reconciledBy,
+      reconciledAt: shift.reconciledAt,
+      route: route
+        ? {
+            id: route.id,
+            totalDistanceKm: Number(route.total_distance_km || 0),
+            totalEstimatedTimeMin: Number(route.total_estimated_time_min || 0),
+            status: route.status,
+            totalOrders,
+            deliveredCount,
+            failedCount,
+          }
+        : null,
+      stops: stopsDetail,
+    };
+  }
+
+  /**
+   * POST /reports/shifts/bulk-reconcile
+   * Duyệt đối soát COD hàng loạt cho nhiều ca cùng lúc
+   */
+  async bulkReconcileShifts(dto: BulkReconcileShiftsDto, user: JwtPayload) {
+    return this.dataSource.transaction(async (manager) => {
+      // 1. Lấy tất cả shifts với pessimistic write lock
+      const shifts = await manager.find(Shift, {
+        where: { id: In(dto.shiftIds) },
+        relations: ['driver'],
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (shifts.length === 0) {
+        throw new NotFoundException('Không tìm thấy ca làm việc nào');
+      }
+
+      // 2. Lọc bỏ các ca đã đối soát rồi
+      const pendingShifts = shifts.filter((s) => s.reconciledAt === null);
+
+      if (pendingShifts.length === 0) {
+        throw new BadRequestException('Tất cả ca đã được đối soát trước đó');
+      }
+
+      const reconciledShiftIds: string[] = [];
+      const now = new Date();
+
+      // 3. Cập nhật từng ca chờ đối soát
+      for (const shift of pendingShifts) {
+        shift.status = ShiftStatus.CLOSED;
+        // Nếu chưa có codSubmitted thì mặc định = codCollected (khớp 100%)
+        if (!shift.codSubmitted || Number(shift.codSubmitted) === 0) {
+          shift.codSubmitted = Number(shift.codCollected);
+        }
+        shift.reconciledBy = user.sub;
+        shift.reconciledAt = now;
+        reconciledShiftIds.push(shift.id);
+      }
+
+      // 4. Bulk save shifts
+      await manager.save(Shift, pendingShifts);
+
+      // 5. Cập nhật trạng thái tài xế sang OFFLINE
+      const driverIds = pendingShifts
+        .filter(
+          (s) =>
+            s.driver &&
+            (s.driver.currentShiftStatus as unknown as DriverShiftStatus) !==
+              DriverShiftStatus.OFFLINE,
+        )
+        .map((s) => s.driver.userId);
+
+      if (driverIds.length > 0) {
+        await manager
+          .createQueryBuilder()
+          .update(Driver)
+          .set({ currentShiftStatus: DriverShiftStatus.OFFLINE })
+          .where('user_id IN (:...ids)', { ids: driverIds })
+          .execute();
+      }
+
+      const skippedCount = shifts.length - pendingShifts.length;
+
+      return {
+        success: true,
+        reconciledCount: reconciledShiftIds.length,
+        reconciledShiftIds,
+        skippedCount,
+        message: `Đã duyệt ${reconciledShiftIds.length} ca${skippedCount > 0 ? `, bỏ qua ${skippedCount} ca đã đối soát` : ''}`,
       };
     });
   }

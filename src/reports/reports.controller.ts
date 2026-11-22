@@ -1,4 +1,16 @@
-import { Controller, Get, Patch, Param, Body, Query, Res, UseInterceptors } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Post,
+  Param,
+  Body,
+  Query,
+  Res,
+  UseInterceptors,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { CacheInterceptor, CacheKey, CacheTTL } from '@nestjs/cache-manager';
 import { ReportsService } from './reports.service';
@@ -7,6 +19,7 @@ import { UserRole } from '../entities/user.entity';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { ReconcileShiftDto } from './dto/reconcile-shift.dto';
+import { BulkReconcileShiftsDto } from './dto/bulk-reconcile-shifts.dto';
 
 @Controller('reports')
 export class ReportsController {
@@ -47,6 +60,27 @@ export class ReportsController {
     @Query('endDate') endDate?: string,
   ) {
     return this.reportsService.getKpis(period || 'week', startDate, endDate);
+  }
+
+  /**
+   * GET /reports/shifts/:id
+   * Chi tiết ca làm việc: thông tin tài xế, dòng tiền COD, danh sách đơn, ảnh POD
+   */
+  @Get('/shifts/:id')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  async getShiftDetail(@Param('id') shiftId: string) {
+    return this.reportsService.getShiftDetail(shiftId);
+  }
+
+  /**
+   * POST /reports/shifts/bulk-reconcile
+   * Duyệt đối soát COD hàng loạt cho nhiều ca cùng lúc
+   */
+  @Post('/shifts/bulk-reconcile')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  async bulkReconcileShifts(@Body() dto: BulkReconcileShiftsDto, @CurrentUser() user: JwtPayload) {
+    return this.reportsService.bulkReconcileShifts(dto, user);
   }
 
   /**
