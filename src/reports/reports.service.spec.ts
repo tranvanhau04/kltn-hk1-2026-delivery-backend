@@ -7,6 +7,7 @@ import { Order, OrderStatus } from '../entities/order.entity';
 import { Shift, ShiftStatus } from '../entities/shift.entity';
 import { Driver, DriverShiftStatus } from '../entities/driver.entity';
 import { UserRole } from '../entities/user.entity';
+import { S3Service } from '../s3/s3.service';
 import * as ExcelJS from 'exceljs';
 import { ReconcileShiftDto } from './dto/reconcile-shift.dto';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
@@ -41,21 +42,40 @@ describe('ReportsService', () => {
 
   const mockShiftRepo = {
     createQueryBuilder: jest.fn(() => mockShiftQb),
+    findOne: jest.fn(),
+    find: jest.fn(),
+    save: jest.fn(),
   };
 
   const mockDriverRepo = {
     save: jest.fn(),
   };
 
+  const mockQueryBuilder = {
+    update: jest.fn().mockReturnThis(),
+    set: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    execute: jest.fn().mockResolvedValue({ affected: 1 }),
+  };
+
   const mockEntityManager = {
     findOne: jest.fn(),
+    find: jest.fn(),
     save: jest.fn(),
+    createQueryBuilder: jest.fn(() => mockQueryBuilder),
   };
 
   const mockDataSource = {
     transaction: jest.fn(async (cb: (manager: typeof mockEntityManager) => Promise<unknown>) => {
       return cb(mockEntityManager);
     }),
+    query: jest.fn(),
+  };
+
+  const mockS3Service = {
+    getPresignedUrl: jest.fn().mockResolvedValue('https://presigned.s3.url/image.jpg'),
+    uploadFile: jest.fn(),
+    deleteFileWithRetry: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -67,6 +87,7 @@ describe('ReportsService', () => {
         { provide: getRepositoryToken(Shift), useValue: mockShiftRepo },
         { provide: getRepositoryToken(Driver), useValue: mockDriverRepo },
         { provide: DataSource, useValue: mockDataSource },
+        { provide: S3Service, useValue: mockS3Service },
       ],
     }).compile();
 
@@ -287,6 +308,138 @@ describe('ReportsService', () => {
       // Check real driver name in Sheet 1 row 5
       const driverCell = workbook.worksheets[0].getCell('C5').value;
       expect(driverCell).toBe('Lê Văn Lái Xe');
+    });
+  });
+
+  describe('getShiftDetail', () => {
+    it('should throw NotFoundException if shift is not found', async () => {
+      mockShiftRepo.findOne.mockResolvedValue(null);
+      await expect(service.getShiftDetail('non-existent-id')).rejects.toThrow(NotFoundException);
+    });
+
+    it('should return shift details with driver, route, and stops with presigned POD URLs', async () => {
+      const mockShift = {
+        id: 'shift-1',
+        driverId: 'driver-1',
+        startTime: new Date(),
+        endTime: new Date(),
+        status: ShiftStatus.PENDING_SETTLEMENT,
+        startingCashCod: 500000,
+        codCollected: 1500000,
+        codSubmitted: 1500000,
+        reconciledBy: null,
+        reconciledAt: null,
+        driver: {
+          licensePlate: '59A-123.45',
+          vehicleType: 'MOTORBIKE',
+        },
+      };
+
+      mockShiftRepo.findOne.mockResolvedValue(mockShift);
+
+      // Query 1: users table for driver name
+      mockDataSource.query
+        .mockResolvedValueOnce([{ full_name: 'Nguyễn Văn A', phone: '0901234567' }])
+        // Query 2: routes table
+        .mockResolvedValueOnce([
+          {
+            id: 'route-1',
+            total_distance_km: 25.5,
+            total_estimated_time_min: 120,
+            status: 'COMPLETED',
+          },
+        ])
+        // Query 3: stops + orders + PODs
+        .mockResolvedValueOnce([
+          {
+            stop_id: 'stop-1',
+            sequence_no: 1,
+            stop_status: 'COMPLETED',
+            arrived_at: new Date(),
+            order_id: 'order-1',
+            order_code: 'ORD-001',
+            receiver_name: 'Trần B',
+            receiver_phone: '0912345678',
+            delivery_address: '123 Test St',
+            cod_amount: 500000,
+            pod_id: 'pod-1',
+            pod_photo_url: 'pod/sample.jpg',
+            pod_cod_collected: 500000,
+            pod_failure_reason: null,
+            pod_confirmed_at: new Date(),
+          },
+        ]);
+
+      const result = await service.getShiftDetail('shift-1');
+
+      expect(result.shiftId).toBe('shift-1');
+      expect(result.driverName).toBe('Nguyễn Văn A');
+      expect(result.licensePlate).toBe('59A-123.45');
+      expect(result.route?.id).toBe('route-1');
+      expect(result.stops).toHaveLength(1);
+      expect(result.stops[0].pod?.photoUrl).toBe('https://presigned.s3.url/image.jpg');
+      expect(mockS3Service.getPresignedUrl).toHaveBeenCalledWith('pod/sample.jpg');
+    });
+  });
+
+  describe('bulkReconcileShifts', () => {
+    const mockUser: JwtPayload = {
+      sub: 'admin-uuid',
+      role: UserRole.ADMIN,
+      email: 'admin@smartexpress.vn',
+    };
+
+    it('should throw NotFoundException if no shifts are found', async () => {
+      mockEntityManager.find.mockResolvedValue([]);
+      await expect(service.bulkReconcileShifts({ shiftIds: ['id-1'] }, mockUser)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('should throw BadRequestException if all shifts are already reconciled', async () => {
+      mockEntityManager.find.mockResolvedValue([
+        { id: 'id-1', reconciledAt: new Date(), status: ShiftStatus.CLOSED },
+      ]);
+      await expect(service.bulkReconcileShifts({ shiftIds: ['id-1'] }, mockUser)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('should reconcile multiple pending shifts and set drivers OFFLINE', async () => {
+      const shift1 = {
+        id: 'shift-1',
+        status: ShiftStatus.PENDING_SETTLEMENT,
+        codCollected: 1000000,
+        codSubmitted: 0,
+        reconciledAt: null,
+        reconciledBy: null,
+        driver: { userId: 'driver-1', currentShiftStatus: DriverShiftStatus.ONLINE_READY },
+      } as unknown as Shift;
+      const shift2 = {
+        id: 'shift-2',
+        status: ShiftStatus.PENDING_SETTLEMENT,
+        codCollected: 2000000,
+        codSubmitted: 2000000,
+        reconciledAt: null,
+        reconciledBy: null,
+        driver: { userId: 'driver-2', currentShiftStatus: DriverShiftStatus.ONLINE_READY },
+      } as unknown as Shift;
+
+      mockEntityManager.find.mockResolvedValue([shift1, shift2]);
+      mockEntityManager.save.mockResolvedValue([shift1, shift2]);
+
+      const result = await service.bulkReconcileShifts(
+        { shiftIds: ['shift-1', 'shift-2'] },
+        mockUser,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.reconciledCount).toBe(2);
+      expect(shift1.status).toBe(ShiftStatus.CLOSED);
+      expect(shift1.codSubmitted).toBe(1000000); // Defaults to codCollected
+      expect(shift1.reconciledBy).toBe('admin-uuid');
+      expect(shift1.reconciledAt).not.toBeNull();
+      expect(mockEntityManager.createQueryBuilder).toHaveBeenCalled();
     });
   });
 });
