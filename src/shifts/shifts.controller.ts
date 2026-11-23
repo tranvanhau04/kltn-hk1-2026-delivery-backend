@@ -92,7 +92,7 @@ export class ShiftsController {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * GET /driver/active-route
+   * GET /driver/active-route & GET /shifts/active-route (alias)
    * Returns the most recent active delivery route for the authenticated driver.
    * Stops are ordered by sequence_no ASC.
    */
@@ -102,17 +102,29 @@ export class ShiftsController {
     return this.shiftsService.getActiveRoute(user);
   }
 
+  @Get('shifts/active-route')
+  @Roles(UserRole.DRIVER)
+  getActiveRouteAlias(@CurrentUser() user: JwtPayload) {
+    return this.shiftsService.getActiveRoute(user);
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Shift summary (Mobile Frame 16)
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
-   * GET /driver/shift/summary
+   * GET /driver/shift/summary & GET /shifts/summary (alias)
    * Returns shift status, active shift info, order counters and COD balance.
    */
   @Get('driver/shift/summary')
   @Roles(UserRole.DRIVER)
   getShiftSummary(@CurrentUser() user: JwtPayload) {
+    return this.shiftsService.getShiftSummary(user);
+  }
+
+  @Get('shifts/summary')
+  @Roles(UserRole.DRIVER)
+  getShiftSummaryAlias(@CurrentUser() user: JwtPayload) {
     return this.shiftsService.getShiftSummary(user);
   }
 

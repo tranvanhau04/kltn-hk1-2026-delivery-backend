@@ -9,6 +9,7 @@ import {
   HttpStatus,
   Logger,
   ParseUUIDPipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import { RoutesService } from './routes.service';
 import type { ConfirmRoutesDto, QueryRoutesDto } from './routes.service';
@@ -72,15 +73,10 @@ export class RoutesController {
   /**
    * GET /routes
    * List routes with optional filters.
-   *
-   * Query params:
-   *  - driverId: string (UUID)
-   *  - status:   PLANNED | IN_PROGRESS | COMPLETED | CANCELLED
-   *  - date:     YYYY-MM-DD
-   *  - page:     number (default 1)
-   *  - limit:    number (default 20)
+   * Access: ADMIN, DISPATCHER only.
    */
   @Get()
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   async findAll(@Query() query: QueryRoutesDto) {
     return this.routesService.findAll(query);
   }
@@ -90,6 +86,7 @@ export class RoutesController {
    * Get active route for the currently authenticated driver.
    */
   @Get('active')
+  @Roles(UserRole.DRIVER, UserRole.ADMIN, UserRole.DISPATCHER)
   async getActiveRoute(@CurrentUser() user: JwtPayload): Promise<Record<string, unknown>> {
     return this.routesService.getActiveRouteForDriver(user?.sub);
   }
@@ -99,6 +96,7 @@ export class RoutesController {
    * Alias of /routes/active.
    */
   @Get('today')
+  @Roles(UserRole.DRIVER, UserRole.ADMIN, UserRole.DISPATCHER)
   async getTodayRoute(@CurrentUser() user: JwtPayload): Promise<Record<string, unknown>> {
     return this.routesService.getActiveRouteForDriver(user?.sub);
   }
@@ -108,7 +106,14 @@ export class RoutesController {
    * Get active route for a specific driver by driverId.
    */
   @Get('driver/:driverId')
-  async getDriverRoute(@Param('driverId') driverId: string): Promise<Record<string, unknown>> {
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  async getDriverRoute(
+    @Param('driverId') driverId: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<Record<string, unknown>> {
+    if (user.role === UserRole.DRIVER && user.sub !== driverId) {
+      throw new ForbiddenException('Bạn chỉ có thể xem lộ trình của chính mình');
+    }
     return this.routesService.getActiveRouteForDriver(driverId);
   }
 
@@ -118,7 +123,15 @@ export class RoutesController {
    * depot info, and parsed polyline coordinates.
    */
   @Get(':id')
-  async findById(@Param('id', new ParseUUIDPipe({ version: '4', optional: true })) id: string) {
-    return this.routesService.findById(id);
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  async findById(
+    @Param('id', new ParseUUIDPipe({ version: '4', optional: true })) id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    const route = (await this.routesService.findById(id)) as { driverId?: string };
+    if (user.role === UserRole.DRIVER && route && route.driverId !== user.sub) {
+      throw new ForbiddenException('Bạn không có quyền xem lộ trình này');
+    }
+    return route;
   }
 }

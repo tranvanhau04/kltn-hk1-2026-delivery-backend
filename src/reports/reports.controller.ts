@@ -9,6 +9,7 @@ import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { ReconcileShiftDto } from './dto/reconcile-shift.dto';
 
 @Controller('reports')
+@Roles(UserRole.ADMIN, UserRole.DISPATCHER)
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
@@ -117,6 +118,62 @@ export class ReportsController {
     );
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
+    await workbook.xlsx.write(res);
+    res.end();
+  }
+
+  /**
+   * GET /reports/analytics
+   * Analytics overview: revenue, top drivers, top customers
+   */
+  @Get('analytics')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  async getAnalytics(@Query('days') days?: string, @Query('period') period?: string) {
+    let numDays = Number(days);
+    if (!numDays || isNaN(numDays)) {
+      if (period === 'month' || period === '30' || period === '30d') numDays = 30;
+      else if (period === 'custom' || period === '90' || period === '90d') numDays = 90;
+      else if (period === 'week' || period === '7' || period === '7d') numDays = 7;
+      else numDays = Number(period) || 7;
+    }
+    return this.reportsService.getAnalytics(numDays);
+  }
+
+  /**
+   * GET /reports/export-analytics
+   * Export analytics to Excel (.xlsx)
+   */
+  @Get('export-analytics')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  async exportAnalyticsExcel(
+    @Res() res: Response,
+    @Query('days') days?: string,
+    @Query('period') period?: string,
+    @Query('type') type?: string,
+  ) {
+    let numDays = Number(days);
+    if (!numDays || isNaN(numDays)) {
+      if (period === 'month' || period === '30' || period === '30d') numDays = 30;
+      else if (period === 'custom' || period === '90' || period === '90d') numDays = 90;
+      else if (period === 'week' || period === '7' || period === '7d') numDays = 7;
+      else numDays = Number(period) || 7;
+    }
+    const workbook = await this.reportsService.generateAnalyticsExcelExport(
+      numDays,
+      type || 'revenue',
+    );
+    const typeNameMap: Record<string, string> = {
+      revenue: 'doanh-thu',
+      top_drivers: 'top-tai-xe',
+      top_customers: 'top-khach-hang',
+    };
+    const suffix = (type && typeNameMap[type]) || 'phan-tich';
+    const filename = `Bao-cao-${suffix}-SmartExpress-${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     await workbook.xlsx.write(res);
     res.end();
   }

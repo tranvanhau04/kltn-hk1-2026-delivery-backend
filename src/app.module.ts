@@ -23,6 +23,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { CacheModule } from '@nestjs/cache-manager';
 import { redisStore } from 'cache-manager-redis-yet';
 import { ReportsModule } from './reports/reports.module';
+import { AiAnalystModule } from './ai-analyst/ai-analyst.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { ReportsModule } from './reports/reports.module';
     DriversModule,
     ShiftsModule,
     ReportsModule,
+    AiAnalystModule,
     StopsModule,
     S3Module,
   ],

@@ -7,6 +7,7 @@ import {
   HttpException,
   HttpStatus,
   Optional,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
@@ -14,9 +15,12 @@ import { TrackingLog } from '../entities/tracking-log.entity';
 import { Driver } from '../entities/driver.entity';
 import { Route } from '../entities/route.entity';
 import { Stop } from '../entities/stop.entity';
-import { User } from '../entities/user.entity';
+import { User, UserRole } from '../entities/user.entity';
 import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
 import { SimulationService } from './simulation.service';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { v4 as uuidv4 } from 'uuid';
 
 interface LocationDto {
@@ -46,6 +50,7 @@ export class TrackingController {
    * Starts background GPS simulation for driver Văn Hậu Trần
    */
   @Post('tracking/simulate/start')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   startSimulation() {
     return this.simulationService.startSimulation();
   }
@@ -55,6 +60,7 @@ export class TrackingController {
    * Stops background GPS simulation
    */
   @Post('tracking/simulate/stop')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   stopSimulation() {
     return this.simulationService.stopSimulation();
   }
@@ -63,6 +69,7 @@ export class TrackingController {
    * GET /api/tracking/simulate/status
    */
   @Get('tracking/simulate/status')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   getSimulationStatus() {
     return { isRunning: this.simulationService.isRunning() };
   }
@@ -74,6 +81,7 @@ export class TrackingController {
    * Never emits random/generated coordinates.
    */
   @Get('tracking/live')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   async liveTracking() {
     // Get all non-offline drivers
     const drivers = await this.driverRepo.find();
@@ -157,7 +165,11 @@ export class TrackingController {
    * Accepts optional speed and heading for richer telemetry.
    */
   @Post('driver/location')
-  async postLocation(@Body() dto: LocationDto) {
+  @Roles(UserRole.DRIVER, UserRole.ADMIN, UserRole.DISPATCHER)
+  async postLocation(@Body() dto: LocationDto, @CurrentUser() user: JwtPayload) {
+    if (user?.role === UserRole.DRIVER && user.sub !== dto.driverId) {
+      throw new ForbiddenException('Bạn chỉ có thể cập nhật vị trí của chính mình');
+    }
     if (!dto.driverId || dto.lat == null || dto.lng == null) {
       throw new HttpException('driverId, lat and lng are required', HttpStatus.BAD_REQUEST);
     }
@@ -180,12 +192,20 @@ export class TrackingController {
    * Returns a clean 404-style response when no route is assigned for today — never returns mock data.
    */
   @Get('tracking/driver/:driverId/route-today')
-  async getDriverRouteToday(@Param('driverId') driverId: string) {
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  async getDriverRouteToday(@Param('driverId') driverId: string, @CurrentUser() user: JwtPayload) {
+    if (user?.role === UserRole.DRIVER && user.sub !== driverId) {
+      throw new ForbiddenException('Bạn chỉ có thể xem lộ trình của chính mình');
+    }
     return this.findDriverRoute(driverId);
   }
 
   @Get('driver/:driverId/route')
-  async getDriverRouteAlias(@Param('driverId') driverId: string) {
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  async getDriverRouteAlias(@Param('driverId') driverId: string, @CurrentUser() user: JwtPayload) {
+    if (user?.role === UserRole.DRIVER && user.sub !== driverId) {
+      throw new ForbiddenException('Bạn chỉ có thể xem lộ trình của chính mình');
+    }
     return this.findDriverRoute(driverId);
   }
 
@@ -335,7 +355,11 @@ export class TrackingController {
    * Ends the driver's shift by setting their status to OFFLINE.
    */
   @Post('driver/:driverId/shift/end')
-  async endDriverShift(@Param('driverId') driverId: string) {
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  async endDriverShift(@Param('driverId') driverId: string, @CurrentUser() user: JwtPayload) {
+    if (user?.role === UserRole.DRIVER && user.sub !== driverId) {
+      throw new ForbiddenException('Bạn chỉ có thể kết thúc ca của chính mình');
+    }
     const driver = await this.driverRepo.findOne({ where: { userId: driverId } });
     if (!driver) {
       throw new HttpException('Driver not found', HttpStatus.NOT_FOUND);
@@ -352,7 +376,11 @@ export class TrackingController {
    * Starts the driver's shift by setting their status to ONLINE_READY.
    */
   @Post('driver/:driverId/shift/start')
-  async startDriverShift(@Param('driverId') driverId: string) {
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  async startDriverShift(@Param('driverId') driverId: string, @CurrentUser() user: JwtPayload) {
+    if (user?.role === UserRole.DRIVER && user.sub !== driverId) {
+      throw new ForbiddenException('Bạn chỉ có thể bắt đầu ca của chính mình');
+    }
     const driver = await this.driverRepo.findOne({ where: { userId: driverId } });
     if (!driver) {
       throw new HttpException('Driver not found', HttpStatus.NOT_FOUND);

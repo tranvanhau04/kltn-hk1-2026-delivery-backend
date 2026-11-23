@@ -13,6 +13,7 @@ import { ZoneDriver } from '../entities/zone-driver.entity';
 import { Driver } from '../entities/driver.entity';
 import { Order } from '../entities/order.entity';
 import { CreateZoneDto } from './dto/create-zone.dto';
+import { UpdateZoneDto } from './dto/update-zone.dto';
 import { AssignDriversDto } from './dto/assign-drivers.dto';
 
 // ─── Overload Severity Thresholds ────────────────────────────────────────────
@@ -51,24 +52,44 @@ export interface ZoneWithMetrics {
 
 // ─── GeoJSON validation helper ────────────────────────────────────────────────
 
-function validateAndParseGeoJson(raw: string): object {
+export function normalizeAndValidateGeoJson(raw: string | Record<string, unknown>): {
+  parsed: object;
+  stringified: string;
+} {
   let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new BadRequestException('boundary_geojson không phải là JSON hợp lệ.');
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      throw new BadRequestException('boundaryGeoJson không được để trống.');
+    }
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      throw new BadRequestException('boundaryGeoJson không phải là chuỗi JSON hợp lệ.');
+    }
+  } else if (typeof raw === 'object' && raw !== null) {
+    parsed = raw;
+  } else {
+    throw new BadRequestException('boundaryGeoJson phải là chuỗi JSON hoặc đối tượng GeoJSON.');
   }
 
   if (typeof parsed !== 'object' || parsed === null) {
-    throw new BadRequestException('boundary_geojson phải là đối tượng GeoJSON.');
+    throw new BadRequestException('boundaryGeoJson phải là đối tượng GeoJSON hợp lệ.');
   }
 
-  const geo = parsed as { type?: string };
+  const geo = parsed as { type?: string; coordinates?: unknown };
   if (!['Polygon', 'MultiPolygon'].includes(geo.type ?? '')) {
-    throw new BadRequestException('boundary_geojson phải là GeoJSON Polygon hoặc MultiPolygon.');
+    throw new BadRequestException('boundaryGeoJson phải là GeoJSON Polygon hoặc MultiPolygon.');
   }
 
-  return parsed;
+  if (!geo.coordinates || !Array.isArray(geo.coordinates)) {
+    throw new BadRequestException('Tọa độ coordinates của GeoJSON không hợp lệ.');
+  }
+
+  return {
+    parsed: parsed,
+    stringified: typeof raw === 'string' ? raw : JSON.stringify(raw),
+  };
 }
 
 @Injectable()
@@ -184,28 +205,48 @@ export class ZonesService {
   }
 
   async create(dto: CreateZoneDto): Promise<ZoneWithMetrics> {
+    let stringifiedGeoJson: string | null = null;
     if (dto.boundaryGeoJson) {
-      validateAndParseGeoJson(dto.boundaryGeoJson);
+      const validated = normalizeAndValidateGeoJson(dto.boundaryGeoJson);
+      stringifiedGeoJson = validated.stringified;
     }
 
     const zone = this.zoneRepo.create({
       id: uuidv4(),
       name: dto.name,
-      boundaryGeoJson: dto.boundaryGeoJson ?? null,
+      boundaryGeoJson: stringifiedGeoJson,
     });
 
     const saved = await this.zoneRepo.save(zone);
     return this.toZoneWithMetrics(saved);
   }
 
-  async updateBoundary(id: string, boundaryGeoJson: string): Promise<ZoneWithMetrics> {
+  async update(id: string, dto: UpdateZoneDto): Promise<ZoneWithMetrics> {
     const zone = await this.zoneRepo.findOne({ where: { id } });
     if (!zone) throw new NotFoundException(`Không tìm thấy khu vực với ID: ${id}`);
 
-    validateAndParseGeoJson(boundaryGeoJson);
-    zone.boundaryGeoJson = boundaryGeoJson;
+    if (dto.name !== undefined) {
+      zone.name = dto.name;
+    }
+
+    if (dto.boundaryGeoJson !== undefined) {
+      if (dto.boundaryGeoJson === null || dto.boundaryGeoJson === '') {
+        zone.boundaryGeoJson = null;
+      } else {
+        const validated = normalizeAndValidateGeoJson(dto.boundaryGeoJson);
+        zone.boundaryGeoJson = validated.stringified;
+      }
+    }
+
     const saved = await this.zoneRepo.save(zone);
     return this.toZoneWithMetrics(saved);
+  }
+
+  async updateBoundary(
+    id: string,
+    boundaryGeoJson: string | Record<string, unknown>,
+  ): Promise<ZoneWithMetrics> {
+    return this.update(id, { boundaryGeoJson });
   }
 
   // ─── Driver Assignment ──────────────────────────────────────────────────────
@@ -232,11 +273,22 @@ export class ZonesService {
           throw new NotFoundException(`Không tìm thấy tài xế với ID: ${driverId}`);
         }
 
-        // Check if already assigned (idempotent)
-        const existing = await queryRunner.manager.findOne(ZoneDriver, {
-          where: { zoneId, driverId },
+        // Check if already assigned to another zone (1 driver belongs to at most 1 zone)
+        const existingAssignment = await queryRunner.manager.findOne(ZoneDriver, {
+          where: { driverId },
         });
-        if (!existing) {
+        if (existingAssignment && existingAssignment.zoneId !== zoneId) {
+          const otherZone = await queryRunner.manager.findOne(Zone, {
+            where: { id: existingAssignment.zoneId },
+          });
+          const otherZoneName = otherZone ? otherZone.name : existingAssignment.zoneId;
+          throw new ConflictException(
+            `Tài xế này đã được phân công ở khu vực ${otherZoneName}. Vui lòng gỡ khỏi khu vực cũ trước khi chuyển.`,
+          );
+        }
+
+        // Check if already assigned to this zone (idempotent)
+        if (!existingAssignment) {
           const zd = queryRunner.manager.create(ZoneDriver, { zoneId, driverId });
           await queryRunner.manager.save(zd);
           this.logger.log(`Assigned driver ${driverId} to zone ${zoneId}`);
@@ -298,10 +350,14 @@ export class ZonesService {
 
     let parsedGeoJson: object | null = null;
     if (zone.boundaryGeoJson) {
-      try {
-        parsedGeoJson = JSON.parse(zone.boundaryGeoJson) as object;
-      } catch {
-        parsedGeoJson = null;
+      if (typeof zone.boundaryGeoJson === 'object') {
+        parsedGeoJson = zone.boundaryGeoJson;
+      } else if (typeof zone.boundaryGeoJson === 'string' && zone.boundaryGeoJson.trim() !== '') {
+        try {
+          parsedGeoJson = JSON.parse(zone.boundaryGeoJson) as object;
+        } catch {
+          parsedGeoJson = null;
+        }
       }
     }
 
