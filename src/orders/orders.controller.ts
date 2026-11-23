@@ -8,6 +8,7 @@ import {
   UseInterceptors,
   UploadedFile,
   Query,
+  ForbiddenException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { OrdersService } from './orders.service';
@@ -51,8 +52,14 @@ export class OrdersController {
    * Returns active orders assigned to the specified driver today.
    */
   @Get('driver/:driverId/today')
-  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
-  getDriverOrdersToday(@Param('driverId') driverId: string): Promise<Order[]> {
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  getDriverOrdersToday(
+    @Param('driverId') driverId: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<Order[]> {
+    if (user.role === UserRole.DRIVER && user.sub !== driverId) {
+      throw new ForbiddenException('Bạn chỉ có thể xem đơn hàng của chính mình');
+    }
     return this.ordersService.findOrdersByDriver(driverId);
   }
 

@@ -824,4 +824,378 @@ export class ReportsService {
 
     return workbook;
   }
+
+  // ─── Analytics ───────────────────────────────────────────────────────
+
+  private computeGrossFee(order: Order): number {
+    const rawFee = Number(order.deliveryFee);
+    return rawFee > 0
+      ? rawFee
+      : Math.min(60000, Math.round((20000 + 2000 * Number(order.weightKg || 0)) / 1000) * 1000);
+  }
+
+  private computeRevenueSplit(grossFee: number) {
+    const platformRevenue = Math.round((grossFee * 0.15) / 1000) * 1000;
+    const driverIncome = grossFee - platformRevenue;
+    return { platformRevenue, driverIncome };
+  }
+
+  async getAnalytics(days: number) {
+    const end = endOfDay(new Date());
+    const start = startOfDay(new Date());
+    start.setDate(start.getDate() - days);
+
+    // ── 1. Revenue Report ──────────────────────────────────────────────
+    const deliveredOrders = await this.orderRepo
+      .createQueryBuilder('o')
+      .where('o.status = :status', { status: OrderStatus.DELIVERED })
+      .andWhere('o.created_at >= :start AND o.created_at <= :end', { start, end })
+      .getMany();
+
+    let totalGrossRevenue = 0;
+    let totalPlatformRevenue = 0;
+    let totalDriverPayout = 0;
+
+    const dayLabels = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+    const weekBuckets = dayLabels.map((label) => ({
+      label,
+      grossRevenue: 0,
+      platformRevenue: 0,
+      driverPayout: 0,
+      deliveredOrders: 0,
+    }));
+
+    deliveredOrders.forEach((o) => {
+      const grossFee = this.computeGrossFee(o);
+      const { platformRevenue, driverIncome } = this.computeRevenueSplit(grossFee);
+
+      totalGrossRevenue += grossFee;
+      totalPlatformRevenue += platformRevenue;
+      totalDriverPayout += driverIncome;
+
+      const d = o.createdAt ? new Date(o.createdAt) : new Date();
+      // MySQL WEEKDAY: 0=Mon … 6=Sun  |  JS getDay: 0=Sun … 6=Sat
+      const jsDay = d.getDay();
+      const weekdayIdx = jsDay === 0 ? 6 : jsDay - 1; // map to 0=Mon…6=Sun
+      weekBuckets[weekdayIdx].grossRevenue += grossFee;
+      weekBuckets[weekdayIdx].platformRevenue += platformRevenue;
+      weekBuckets[weekdayIdx].driverPayout += driverIncome;
+      weekBuckets[weekdayIdx].deliveredOrders += 1;
+    });
+
+    const revenueReport = {
+      summary: {
+        totalGrossRevenue,
+        totalPlatformRevenue,
+        totalDriverPayout,
+        deliveredCount: deliveredOrders.length,
+      },
+      chartData: weekBuckets,
+    };
+
+    // ── 2. Top Drivers by Revenue ──────────────────────────────────────
+    const driverOrders = await this.orderRepo
+      .createQueryBuilder('o')
+      .leftJoin('drivers', 'd', 'd.user_id = o.driver_id')
+      .leftJoin('users', 'u', 'u.id = d.user_id')
+      .addSelect('d.user_id', 'd_user_id')
+      .addSelect('u.full_name', 'u_full_name')
+      .addSelect('d.license_plate', 'd_license_plate')
+      .addSelect('d.vehicle_type', 'd_vehicle_type')
+      .where('o.status = :status', { status: OrderStatus.DELIVERED })
+      .andWhere('o.created_at >= :start AND o.created_at <= :end', { start, end })
+      .getRawAndEntities();
+
+    const driverMap = new Map<
+      string,
+      {
+        driverId: string;
+        fullName: string;
+        licensePlate: string;
+        vehicleType: string;
+        deliveredOrders: number;
+        totalGrossRevenue: number;
+        platformRevenue: number;
+        driverNetIncome: number;
+      }
+    >();
+
+    driverOrders.entities.forEach((o, idx) => {
+      const raw = driverOrders.raw[idx] as Record<string, string | undefined>;
+      const dId = o.driverId || (raw['d_user_id'] ?? '');
+      if (!dId) return;
+
+      const grossFee = this.computeGrossFee(o);
+      const { platformRevenue, driverIncome } = this.computeRevenueSplit(grossFee);
+
+      const existing = driverMap.get(dId);
+      if (existing) {
+        existing.deliveredOrders += 1;
+        existing.totalGrossRevenue += grossFee;
+        existing.platformRevenue += platformRevenue;
+        existing.driverNetIncome += driverIncome;
+      } else {
+        driverMap.set(dId, {
+          driverId: dId,
+          fullName: raw['u_full_name'] ?? `Tài xế #${dId.slice(0, 8)}`,
+          licensePlate: raw['d_license_plate'] ?? 'N/A',
+          vehicleType: raw['d_vehicle_type'] ?? 'N/A',
+          deliveredOrders: 1,
+          totalGrossRevenue: grossFee,
+          platformRevenue,
+          driverNetIncome: driverIncome,
+        });
+      }
+    });
+
+    const topDriversByRevenue = [...driverMap.values()]
+      .sort((a, b) => b.totalGrossRevenue - a.totalGrossRevenue)
+      .slice(0, 10);
+
+    // ── 3. Top Customers by Orders ─────────────────────────────────────
+    const customerOrders = await this.orderRepo
+      .createQueryBuilder('o')
+      .where('o.status != :cancelled', { cancelled: OrderStatus.CANCELLED })
+      .andWhere('o.created_at >= :start AND o.created_at <= :end', { start, end })
+      .getMany();
+
+    const customerMap = new Map<
+      string,
+      {
+        customerName: string;
+        customerPhone: string;
+        deliveryAddress: string;
+        totalOrders: number;
+        deliveredOrders: number;
+        totalCodValue: number;
+        totalShippingFee: number;
+      }
+    >();
+
+    customerOrders.forEach((o) => {
+      const phone = o.receiverPhone;
+      if (!phone) return;
+      const grossFee = this.computeGrossFee(o);
+
+      const existing = customerMap.get(phone);
+      if (existing) {
+        existing.totalOrders += 1;
+        if (o.status === OrderStatus.DELIVERED) existing.deliveredOrders += 1;
+        existing.totalCodValue += Number(o.codAmount || 0);
+        existing.totalShippingFee += grossFee;
+      } else {
+        customerMap.set(phone, {
+          customerName: o.receiverName || 'Khách vãng lai',
+          customerPhone: phone,
+          deliveryAddress: o.deliveryAddress || 'N/A',
+          totalOrders: 1,
+          deliveredOrders: o.status === OrderStatus.DELIVERED ? 1 : 0,
+          totalCodValue: Number(o.codAmount || 0),
+          totalShippingFee: grossFee,
+        });
+      }
+    });
+
+    const topCustomersByOrders = [...customerMap.values()]
+      .sort((a, b) => b.totalOrders - a.totalOrders || b.totalCodValue - a.totalCodValue)
+      .slice(0, 10);
+
+    return { revenueReport, topDriversByRevenue, topCustomersByOrders };
+  }
+
+  // ─── Analytics Excel Export ──────────────────────────────────────────
+
+  async generateAnalyticsExcelExport(days: number, type: string): Promise<ExcelJS.Workbook> {
+    const data = await this.getAnalytics(days);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'SmartExpress System';
+    workbook.created = new Date();
+
+    const headerFill: ExcelJS.Fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1F4E79' },
+    };
+    const headerFont: Partial<ExcelJS.Font> = {
+      size: 15,
+      bold: true,
+      color: { argb: 'FFFFFFFF' },
+    };
+    const colHeaderFill: ExcelJS.Fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFD9E1F2' },
+    };
+    const currencyFmt = '#,##0 "₫"';
+
+    if (type === 'revenue') {
+      const sheet = workbook.addWorksheet('Báo cáo Doanh thu');
+      const colCount = 6;
+
+      sheet.mergeCells(1, 1, 1, colCount);
+      const title = sheet.getCell('A1');
+      title.value = 'SMARTEXPRESS LOGISTICS - BÁO CÁO DOANH THU';
+      title.font = headerFont;
+      title.fill = headerFill;
+      title.alignment = { vertical: 'middle', horizontal: 'center' };
+      sheet.getRow(1).height = 30;
+
+      sheet.mergeCells(2, 1, 2, colCount);
+      const sub = sheet.getCell('A2');
+      sub.value = `Thời gian xuất: ${new Date().toLocaleString('vi-VN')}`;
+      sub.font = { italic: true, size: 10, color: { argb: 'FF595959' } };
+
+      const hr = sheet.getRow(4);
+      hr.values = [
+        'STT',
+        'Ngày',
+        'Tổng cước vận chuyển',
+        'Doanh thu nền tảng (15%)',
+        'Chi trả tài xế (85%)',
+        'Số đơn giao thành công',
+      ];
+      hr.font = { bold: true };
+      hr.fill = colHeaderFill;
+
+      data.revenueReport.chartData.forEach((item, idx) => {
+        const row = sheet.addRow([
+          idx + 1,
+          item.label,
+          item.grossRevenue,
+          item.platformRevenue,
+          item.driverPayout,
+          item.deliveredOrders,
+        ]);
+        row.getCell(3).numFmt = currencyFmt;
+        row.getCell(4).numFmt = currencyFmt;
+        row.getCell(5).numFmt = currencyFmt;
+      });
+
+      sheet.columns = [
+        { width: 6 },
+        { width: 10 },
+        { width: 28 },
+        { width: 28 },
+        { width: 28 },
+        { width: 28 },
+      ];
+    } else if (type === 'top_drivers') {
+      const sheet = workbook.addWorksheet('Top Tài xế Doanh thu');
+      const colCount = 8;
+
+      sheet.mergeCells(1, 1, 1, colCount);
+      const title = sheet.getCell('A1');
+      title.value = 'SMARTEXPRESS LOGISTICS - TOP TÀI XẾ DOANH THU';
+      title.font = headerFont;
+      title.fill = headerFill;
+      title.alignment = { vertical: 'middle', horizontal: 'center' };
+      sheet.getRow(1).height = 30;
+
+      sheet.mergeCells(2, 1, 2, colCount);
+      const sub = sheet.getCell('A2');
+      sub.value = `Thời gian xuất: ${new Date().toLocaleString('vi-VN')}`;
+      sub.font = { italic: true, size: 10, color: { argb: 'FF595959' } };
+
+      const hr = sheet.getRow(4);
+      hr.values = [
+        'Hạng',
+        'Tên Tài Xế',
+        'Biển Số Xe',
+        'Loại Xe',
+        'Số Đơn Đã Giao',
+        'Tổng Doanh Thu Cước',
+        'Chiết Khấu NTT (15%)',
+        'Thu Nhập Thực Nhận (85%)',
+      ];
+      hr.font = { bold: true };
+      hr.fill = colHeaderFill;
+
+      data.topDriversByRevenue.forEach((d, idx) => {
+        const row = sheet.addRow([
+          idx + 1,
+          d.fullName,
+          d.licensePlate,
+          d.vehicleType,
+          d.deliveredOrders,
+          d.totalGrossRevenue,
+          d.platformRevenue,
+          d.driverNetIncome,
+        ]);
+        row.getCell(6).numFmt = currencyFmt;
+        row.getCell(7).numFmt = currencyFmt;
+        row.getCell(8).numFmt = currencyFmt;
+      });
+
+      sheet.columns = [
+        { width: 8 },
+        { width: 25 },
+        { width: 15 },
+        { width: 15 },
+        { width: 18 },
+        { width: 25 },
+        { width: 25 },
+        { width: 28 },
+      ];
+    } else {
+      // top_customers
+      const sheet = workbook.addWorksheet('Top Khách Hàng');
+      const colCount = 8;
+
+      sheet.mergeCells(1, 1, 1, colCount);
+      const title = sheet.getCell('A1');
+      title.value = 'SMARTEXPRESS LOGISTICS - TOP KHÁCH HÀNG';
+      title.font = headerFont;
+      title.fill = headerFill;
+      title.alignment = { vertical: 'middle', horizontal: 'center' };
+      sheet.getRow(1).height = 30;
+
+      sheet.mergeCells(2, 1, 2, colCount);
+      const sub = sheet.getCell('A2');
+      sub.value = `Thời gian xuất: ${new Date().toLocaleString('vi-VN')}`;
+      sub.font = { italic: true, size: 10, color: { argb: 'FF595959' } };
+
+      const hr = sheet.getRow(4);
+      hr.values = [
+        'Hạng',
+        'Tên Khách Hàng',
+        'Số Điện Thoại',
+        'Địa Chỉ',
+        'Tổng Số Đơn',
+        'Đơn Giao Thành Công',
+        'Tổng COD',
+        'Tổng Phí Ship',
+      ];
+      hr.font = { bold: true };
+      hr.fill = colHeaderFill;
+
+      data.topCustomersByOrders.forEach((c, idx) => {
+        const row = sheet.addRow([
+          idx + 1,
+          c.customerName,
+          c.customerPhone,
+          c.deliveryAddress,
+          c.totalOrders,
+          c.deliveredOrders,
+          c.totalCodValue,
+          c.totalShippingFee,
+        ]);
+        row.getCell(7).numFmt = currencyFmt;
+        row.getCell(8).numFmt = currencyFmt;
+      });
+
+      sheet.columns = [
+        { width: 8 },
+        { width: 25 },
+        { width: 18 },
+        { width: 40 },
+        { width: 15 },
+        { width: 22 },
+        { width: 20 },
+        { width: 20 },
+      ];
+    }
+
+    return workbook;
+  }
 }

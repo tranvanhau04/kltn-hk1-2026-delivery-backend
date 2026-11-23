@@ -7,6 +7,5 @@ export class CreateZoneDto {
   name: string;
 
   @IsOptional()
-  @IsString({ message: 'boundary_geojson phải là chuỗi GeoJSON hợp lệ.' })
-  boundaryGeoJson?: string;
+  boundaryGeoJson?: string | Record<string, unknown>;
 }

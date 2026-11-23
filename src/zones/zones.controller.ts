@@ -11,10 +11,14 @@ import {
 } from '@nestjs/common';
 import { ZonesService, ZoneWithMetrics } from './zones.service';
 import { CreateZoneDto } from './dto/create-zone.dto';
+import { UpdateZoneDto } from './dto/update-zone.dto';
 import { AssignDriversDto } from './dto/assign-drivers.dto';
 import { Driver } from '../entities/driver.entity';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../entities/user.entity';
 
 @Controller('zones')
+@Roles(UserRole.ADMIN, UserRole.DISPATCHER)
 export class ZonesController {
   constructor(private readonly zonesService: ZonesService) {}
 
@@ -37,11 +41,17 @@ export class ZonesController {
     return this.zonesService.create(dto);
   }
 
+  /** PATCH /api/zones/:id — update zone (name, boundary) */
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() dto: UpdateZoneDto): Promise<ZoneWithMetrics> {
+    return this.zonesService.update(id, dto);
+  }
+
   /** PATCH /api/zones/:id/boundary — update zone GeoJSON boundary */
   @Patch(':id/boundary')
   updateBoundary(
     @Param('id') id: string,
-    @Body('boundaryGeoJson') boundaryGeoJson: string,
+    @Body('boundaryGeoJson') boundaryGeoJson: string | Record<string, unknown>,
   ): Promise<ZoneWithMetrics> {
     return this.zonesService.updateBoundary(id, boundaryGeoJson);
   }

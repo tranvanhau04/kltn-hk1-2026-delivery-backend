@@ -42,6 +42,7 @@ interface OptimizeDto {
  * GET  /vrp/routes/:id → Proxy to RoutesService.findById
  */
 @Controller('vrp')
+@Roles(UserRole.DISPATCHER, UserRole.ADMIN)
 export class VrpController {
   private readonly logger = new Logger(VrpController.name);
 

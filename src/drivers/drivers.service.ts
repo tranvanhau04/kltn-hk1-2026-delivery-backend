@@ -283,10 +283,13 @@ export class DriversService {
             { driverId: userId, status: 'IN_PROGRESS' },
             { driverId: userId, status: 'ASSIGNED' },
           ],
-          relations: ['stops', 'stops.order'],
         });
-        if (activeRoute?.stops) {
-          const routeCod = activeRoute.stops
+        if (activeRoute) {
+          const stops = await this.stopRepo.find({
+            where: { routeId: activeRoute.id },
+            relations: ['order'],
+          });
+          const routeCod = stops
             .filter((s) => s.status === 'COMPLETED')
             .reduce((sum, s) => sum + (s.order ? Number(s.order.codAmount) : 0), 0);
           if (routeCod > 0) codCollected = routeCod;

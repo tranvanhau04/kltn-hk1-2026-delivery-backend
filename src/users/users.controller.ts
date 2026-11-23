@@ -18,16 +18,17 @@ import { UserRole } from '../entities/user.entity';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 
 @Controller('users')
+@Roles(UserRole.ADMIN)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   /**
    * GET /api/users
    * Paginated list of users with search and filter.
-   * Access: ADMIN, DISPATCHER.
+   * Access: ADMIN only.
    */
   @Get()
-  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  @Roles(UserRole.ADMIN)
   findAll(@Query() query: QueryUserDto) {
     return this.usersService.findAll(query);
   }
@@ -35,10 +36,10 @@ export class UsersController {
   /**
    * GET /api/users/:id
    * Get single user by ID.
-   * Access: ADMIN, DISPATCHER, or DRIVER (self only).
+   * Access: ADMIN only.
    */
   @Get(':id')
-  @Roles(UserRole.ADMIN, UserRole.DISPATCHER, UserRole.DRIVER)
+  @Roles(UserRole.ADMIN)
   findById(@Param('id') id: string, @CurrentUser() currentUser: JwtPayload) {
     return this.usersService.findById(id, currentUser);
   }

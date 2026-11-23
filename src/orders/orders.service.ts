@@ -217,8 +217,8 @@ export class OrdersService {
     order.receiverName = dto.receiverName;
     order.receiverPhone = dto.receiverPhone;
     order.deliveryAddress = dto.deliveryAddress;
-    order.weightKg = dto.weightKg ?? 0;
-    order.volumeM3 = dto.volumeM3 ?? 0;
+    order.weightKg = dto.weightKg && Number(dto.weightKg) > 0 ? Number(dto.weightKg) : 1.0;
+    order.volumeM3 = dto.volumeM3 && Number(dto.volumeM3) > 0 ? Number(dto.volumeM3) : 0.01;
     order.codAmount = dto.codAmount ?? 0;
     order.senderName = dto.senderName ?? null;
     order.senderPhone = dto.senderPhone ?? null;
@@ -250,6 +250,7 @@ export class OrdersService {
     order.longitude = lng;
 
     const history = new OrderStatusHistory();
+    history.id = crypto.randomUUID();
     history.orderId = order.id;
     history.status = order.status;
     history.note = 'Tạo đơn hàng thủ công';
@@ -334,6 +335,7 @@ export class OrdersService {
     order.updatedAt = new Date();
 
     const history = new OrderStatusHistory();
+    history.id = crypto.randomUUID();
     history.orderId = order.id;
     history.status = status;
     history.note = note || `Cập nhật trạng thái sang ${status}`;
@@ -385,6 +387,7 @@ export class OrdersService {
     order.updatedAt = new Date();
 
     const history = new OrderStatusHistory();
+    history.id = crypto.randomUUID();
     history.orderId = order.id;
     history.status = OrderStatus.ASSIGNED;
     history.note = note || `Đơn hàng được phân công cho tài xế ${driverId}`;
