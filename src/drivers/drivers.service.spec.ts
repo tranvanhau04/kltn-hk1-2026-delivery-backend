@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import * as ExcelJS from 'exceljs';
 import { DriversService } from './drivers.service';
 import { Driver, DriverShiftStatus } from '../entities/driver.entity';
 import { User } from '../entities/user.entity';
@@ -44,10 +46,12 @@ describe('DriversService - getFleetInfo', () => {
 
   const mockUserRepo = {
     findOne: jest.fn(),
+    find: jest.fn(),
   };
 
   const mockDepotRepo = {
     findOne: jest.fn(),
+    find: jest.fn(),
   };
 
   const mockZoneRepo = {
@@ -74,6 +78,10 @@ describe('DriversService - getFleetInfo', () => {
     find: jest.fn(),
   };
 
+  const mockDataSource = {
+    transaction: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -87,6 +95,7 @@ describe('DriversService - getFleetInfo', () => {
         { provide: getRepositoryToken(Shift), useValue: mockShiftRepo },
         { provide: getRepositoryToken(Route), useValue: mockRouteRepo },
         { provide: getRepositoryToken(Stop), useValue: mockStopRepo },
+        { provide: DataSource, useValue: mockDataSource },
       ],
     }).compile();
 
@@ -203,5 +212,95 @@ describe('DriversService - getFleetInfo', () => {
   it('should throw NotFoundException if driver does not exist', async () => {
     mockDriverRepo.findOne.mockResolvedValue(null);
     await expect(service.getFleetInfo('non-existent')).rejects.toThrow(NotFoundException);
+  });
+
+  it('should generate drivers Excel template with 9 headers and 2 sample rows', async () => {
+    mockDepotRepo.find.mockResolvedValue([{ id: 'depot-1', name: 'Hub 01 - Gò Vấp' }]);
+    const wb = await service.generateImportTemplate();
+    const sheet = wb.worksheets[0];
+    expect(sheet.rowCount).toBe(3);
+    expect(sheet.getRow(1).getCell(1).value).toBe('Họ và tên');
+    expect(sheet.getRow(1).getCell(8).value).toBe('Tên Kho / Hub');
+  });
+
+  it('should import valid drivers atomically via dataSource.transaction and isolate bad rows', async () => {
+    mockDepotRepo.find.mockResolvedValue([{ id: 'depot-1', name: 'Hub 01 - Gò Vấp' }]);
+    mockUserRepo.find.mockResolvedValue([]);
+    mockDriverRepo.find.mockResolvedValue([]);
+
+    const savedEntities: unknown[] = [];
+    mockDataSource.transaction.mockImplementation(
+      async (cb: (manager: { create: jest.Mock; save: jest.Mock }) => Promise<void>) => {
+        const manager = {
+          create: jest.fn((_entity: unknown, payload: unknown) => payload),
+          save: jest.fn((_entity: unknown, payload: unknown) => {
+            savedEntities.push(payload);
+            return Promise.resolve(payload);
+          }),
+        };
+        await cb(manager);
+      },
+    );
+
+    const wb = new ExcelJS.Workbook();
+    const sheet = wb.addWorksheet('Drivers');
+    sheet.addRow([
+      'Họ và tên',
+      'Email',
+      'Số điện thoại',
+      'Biển số xe',
+      'Loại xe',
+      'Tải trọng (kg)',
+      'Thể tích (m³)',
+      'Tên Kho / Hub',
+      'Mật khẩu',
+    ]);
+    // Row 2: Valid driver
+    sheet.addRow([
+      'Nguyễn Văn Tài',
+      'tai.nguyen@smartexpress.vn',
+      '0901234567',
+      '59G1-111.22',
+      'MOTORBIKE',
+      50,
+      0.2,
+      'hub 01 - gò vấp',
+      '',
+    ]);
+    // Row 3: Invalid depot name
+    sheet.addRow([
+      'Trần Văn Lỗi',
+      'loi.tran@smartexpress.vn',
+      '0912345678',
+      '59G1-333.44',
+      'VAN_500KG',
+      500,
+      4.0,
+      'Kho Không Tồn Tại',
+      '123456',
+    ]);
+
+    const arrayBuffer = await wb.xlsx.writeBuffer();
+    const file = {
+      originalname: 'drivers.xlsx',
+      buffer: Buffer.from(arrayBuffer),
+    } as Express.Multer.File;
+
+    const result = await service.importExcel(file);
+    expect(result.successCount).toBe(1);
+    expect(result.failedCount).toBe(1);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0].row).toBe(3);
+    expect(result.errors[0].field).toBe('depotName');
+    expect(savedEntities).toHaveLength(2); // 1 User + 1 Driver created atomically
+  });
+
+  it('should reject unsupported file extensions on importExcel', async () => {
+    const badFile = {
+      originalname: 'drivers.csv',
+      buffer: Buffer.from('a,b,c'),
+    } as Express.Multer.File;
+
+    await expect(service.importExcel(badFile)).rejects.toThrow(BadRequestException);
   });
 });

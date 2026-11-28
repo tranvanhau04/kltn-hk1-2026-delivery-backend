@@ -112,6 +112,12 @@ export class StopsService {
     stop.arrivedAt = new Date();
     await this.stopRepo.save(stop);
 
+    // Transition parent route from PLANNED -> IN_PROGRESS upon first stop arrival
+    if (route.status === 'PLANNED') {
+      route.status = 'IN_PROGRESS';
+      await this.routeRepo.save(route);
+    }
+
     // KLTN: Nếu đơn hàng trước đó đang ở trạng thái RESCHEDULED, FAILED hoặc ASSIGNED,
     // khi tài xế đã đến nơi giao lại, cập nhật đơn hàng sang IN_TRANSIT để tiếp tục quy trình giao
     if (
@@ -268,27 +274,31 @@ export class StopsService {
       await queryRunner.manager.save(history);
 
       // 5.5. Accumulate COD in active driver shift — PESSIMISTIC LOCK
-      let shiftCodTotal = 0;
+      // Require an OPEN shift so collected COD cash is never orphaned from shift reconciliation
       const activeShift = await queryRunner.manager.findOne(Shift, {
         where: { driverId: route.driverId, status: ShiftStatus.OPEN },
         order: { startTime: 'DESC' },
         lock: { mode: 'pessimistic_write' },
       });
 
-      if (activeShift) {
-        if (finalCod > 0) {
-          await queryRunner.manager.increment(
-            Shift,
-            { id: activeShift.id },
-            'codCollected',
-            finalCod,
-          );
-          activeShift.codCollected = Number(activeShift.codCollected || 0) + finalCod;
-        }
-        shiftCodTotal = Number(activeShift.codCollected);
+      if (!activeShift) {
+        throw new BadRequestException(
+          'Vui lòng mở ca làm việc trước khi xác nhận giao hàng và thu COD.',
+        );
       }
 
-      // 5.6. Check route auto-completion
+      if (finalCod > 0) {
+        await queryRunner.manager.increment(
+          Shift,
+          { id: activeShift.id },
+          'codCollected',
+          finalCod,
+        );
+        activeShift.codCollected = Number(activeShift.codCollected || 0) + finalCod;
+      }
+      const shiftCodTotal = Number(activeShift.codCollected);
+
+      // 5.6. Transition route status (PLANNED -> IN_PROGRESS, or COMPLETED when all stops done)
       const pendingStopsCount = await queryRunner.manager.count(Stop, {
         where: {
           routeId: route.id,
@@ -298,6 +308,9 @@ export class StopsService {
 
       if (pendingStopsCount === 0) {
         route.status = 'COMPLETED';
+        await queryRunner.manager.save(route);
+      } else if (route.status === 'PLANNED') {
+        route.status = 'IN_PROGRESS';
         await queryRunner.manager.save(route);
       }
 
@@ -511,7 +524,7 @@ export class StopsService {
    * GET /api/stops/:id
    * Chi tiết điểm dừng kèm đơn hàng và ProofOfDelivery (nếu có).
    */
-  async getStopDetail(stopId: string) {
+  async getStopDetail(stopId: string, user?: JwtPayload) {
     const stop = await this.stopRepo.findOne({
       where: { id: stopId },
       relations: ['order'],
@@ -521,7 +534,17 @@ export class StopsService {
       throw new NotFoundException(`Không tìm thấy điểm dừng với id=${stopId}`);
     }
 
+    if (user?.role === UserRole.DRIVER) {
+      const route = await this.routeRepo.findOne({ where: { id: stop.routeId } });
+      if (!route || route.driverId !== user.sub) {
+        throw new ForbiddenException(`Bạn không được phân công lộ trình của điểm dừng này`);
+      }
+    }
+
     const pod = await this.podRepo.findOne({ where: { stopId } });
+    const resolvedPhotoUrl = pod?.photoUrl
+      ? await this.s3Service.getPresignedUrl(pod.photoUrl)
+      : null;
     const rescheduledDate = pod?.rescheduledDate ?? null;
     const failureReason = pod?.failureReason ?? null;
     const confirmedAt = pod?.confirmedAt ?? null;
@@ -545,7 +568,7 @@ export class StopsService {
               failureReason: pod.failureReason,
               rescheduledDate: pod.rescheduledDate,
               confirmedAt: pod.confirmedAt,
-              photoUrl: pod.photoUrl,
+              photoUrl: resolvedPhotoUrl,
               codCollected: Number(pod.codCollected) || 0,
             }
           : null,

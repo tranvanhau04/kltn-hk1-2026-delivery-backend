@@ -47,6 +47,13 @@ export class ZonesController {
     return this.zonesService.update(id, dto);
   }
 
+  /** DELETE /api/zones/:id — delete zone and safely unlink drivers/orders */
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  remove(@Param('id') id: string): Promise<{ success: boolean; deletedId: string }> {
+    return this.zonesService.remove(id);
+  }
+
   /** PATCH /api/zones/:id/boundary — update zone GeoJSON boundary */
   @Patch(':id/boundary')
   updateBoundary(

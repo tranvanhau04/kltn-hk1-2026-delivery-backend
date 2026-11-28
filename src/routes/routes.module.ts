@@ -8,6 +8,7 @@ import { Order } from '../entities/order.entity';
 import { Driver } from '../entities/driver.entity';
 import { Depot } from '../entities/depot.entity';
 import { User } from '../entities/user.entity';
+import { Shift } from '../entities/shift.entity';
 import { OrderStatusHistory } from '../entities/order-status-history.entity';
 import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
 import { TrackingModule } from '../tracking/tracking.module';
@@ -21,6 +22,7 @@ import { TrackingModule } from '../tracking/tracking.module';
       Driver,
       Depot,
       User,
+      Shift,
       OrderStatusHistory,
       ProofOfDelivery,
     ]),

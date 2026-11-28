@@ -19,7 +19,8 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "simulate:driver": "node scripts/simulate-driver-gps.js",
-    "simulate:all": "node scripts/simulate-driver-gps.js --all"
+    "simulate:all": "node scripts/simulate-driver-gps.js --all",
+    "seed:full": "ts-node src/database/seeds/full-production-seeder.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1169.0",

@@ -14,6 +14,7 @@ import { Order, OrderStatus } from '../entities/order.entity';
 import { Driver } from '../entities/driver.entity';
 import { Depot } from '../entities/depot.entity';
 import { User } from '../entities/user.entity';
+import { Shift } from '../entities/shift.entity';
 import { OrderStatusHistory } from '../entities/order-status-history.entity';
 import { TrackingGateway } from '../tracking/tracking.gateway';
 
@@ -322,7 +323,7 @@ describe('RoutesService', () => {
       // 2 updates: bulk order status + driver shift status
       expect(mockQueryRunner.manager.update).toHaveBeenCalledTimes(2);
 
-      // First update: orders status -> ASSIGNED
+      // First update: orders status -> ASSIGNED + driverId linked
       const [orderEntity, , orderUpdate] = mockQueryRunner.manager.update.mock.calls[0] as [
         unknown,
         unknown,
@@ -330,6 +331,7 @@ describe('RoutesService', () => {
       ];
       expect(orderEntity).toBe(Order);
       expect(orderUpdate.status).toBe(OrderStatus.ASSIGNED);
+      expect(orderUpdate.driverId).toBe('driver-1');
 
       // Second update: driver shift status -> BUSY
       const [driverEntity, , driverUpdate] = mockQueryRunner.manager.update.mock.calls[1] as [
@@ -339,6 +341,28 @@ describe('RoutesService', () => {
       ];
       expect(driverEntity).toBe(Driver);
       expect(driverUpdate.currentShiftStatus).toBe('BUSY');
+    });
+
+    it('should attach active OPEN shiftId to confirmed route when present', async () => {
+      mockOrderRepo.find.mockResolvedValue([makeMockOrder('order-1'), makeMockOrder('order-2')]);
+      mockDepotRepo.findOne.mockResolvedValue(makeMockDepot());
+      mockDriverRepo.findOne.mockResolvedValue(makeMockDriver());
+      mockQueryRunner.manager.findOne.mockImplementation((entity: unknown) => {
+        if (entity === Shift) {
+          return Promise.resolve({ id: 'open-shift-1', driverId: 'driver-1', status: 'OPEN' });
+        }
+        if (entity === User) return Promise.resolve(makeMockUser());
+        return Promise.resolve(null);
+      });
+
+      await service.confirmRoutes(validDto, 'dispatcher-1');
+
+      const [routeEntity, insertedRoute] = mockQueryRunner.manager.insert.mock.calls[0] as [
+        unknown,
+        Partial<Route>,
+      ];
+      expect(routeEntity).toBe(Route);
+      expect(insertedRoute.shiftId).toBe('open-shift-1');
     });
 
     it('should generate route code matching ROT-YYYYMMDD-XXXXXX pattern', async () => {
@@ -410,7 +434,7 @@ describe('RoutesService', () => {
         getManyAndCount: jest.fn().mockResolvedValue([[mockRoute], 1]),
       };
       mockRouteRepo.createQueryBuilder.mockReturnValue(qbMock);
-      mockUserRepo.findOne.mockResolvedValue(makeMockUser());
+      mockUserRepo.find.mockResolvedValue([makeMockUser()]);
       mockStopRepo.count.mockResolvedValue(3);
 
       const result = await service.findAll({ page: 1, limit: 20 });

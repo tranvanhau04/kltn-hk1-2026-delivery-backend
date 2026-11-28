@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { CircuitBreaker } from '../../common/resilience/circuit-breaker';
 
 export interface ChatHistoryMessage {
   role: 'user' | 'assistant';
@@ -11,6 +12,17 @@ export interface LlmReasoningResult {
 }
 
 const logger = new Logger('LlmReasoningEngine');
+
+/**
+ * Circuit Breaker protecting outbound Google Gemini API calls.
+ * After 3 consecutive failures/timeouts, trips OPEN for 30s so AI Analyst
+ * falls back immediately to the Local Math Engine (OLS + Z-Score) instead of hanging.
+ */
+export const geminiCircuitBreaker = new CircuitBreaker({
+  name: 'Google-Gemini-API',
+  failureThreshold: 3,
+  cooldownMs: 30_000,
+});
 
 /**
  * Gọi Google Gemini LLM API theo cơ chế Grounded RAG
@@ -77,70 +89,75 @@ CÂU HỎI CỦA NGƯỜI DÙNG: ${params.question}`;
     parts: [{ text: promptPayload }],
   });
 
-  for (const model of candidateModels) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+  return geminiCircuitBreaker.execute<LlmReasoningResult | null>(
+    async () => {
+      for (const model of candidateModels) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
 
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: systemInstruction }],
-          },
-          contents,
-          generationConfig: {
-            thinkingConfig: { thinkingBudget: 0 },
-            temperature: 0.4,
-            maxOutputTokens: 800,
-          },
-        }),
-        signal: controller.signal,
-      });
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              systemInstruction: {
+                parts: [{ text: systemInstruction }],
+              },
+              contents,
+              generationConfig: {
+                thinkingConfig: { thinkingBudget: 0 },
+                temperature: 0.4,
+                maxOutputTokens: 800,
+              },
+            }),
+            signal: controller.signal,
+          });
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        logger.warn(`Gemini API model '${model}' failed with status ${res.status}: ${errText}`);
-        // Chuyển ngay sang model dự phòng tiếp theo nếu gặp 404, 503 hoặc 429
-        if (res.status === 404 || res.status === 503 || res.status === 429) {
-          continue;
-        }
-        return null;
-      }
+          if (!res.ok) {
+            const errText = await res.text().catch(() => '');
+            logger.warn(`Gemini API model '${model}' failed with status ${res.status}: ${errText}`);
+            // Chuyển ngay sang model dự phòng tiếp theo nếu gặp 404, 503 hoặc 429
+            if (res.status === 404 || res.status === 503 || res.status === 429) {
+              continue;
+            }
+            throw new Error(`Gemini API HTTP ${res.status}`);
+          }
 
-      const data = (await res.json()) as {
-        candidates?: Array<{
-          content?: {
-            parts?: Array<{ text?: string }>;
+          const data = (await res.json()) as {
+            candidates?: Array<{
+              content?: {
+                parts?: Array<{ text?: string }>;
+              };
+            }>;
           };
-        }>;
-      };
 
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text && text.trim().length > 0) {
-        return {
-          answer: text.trim(),
-          suggestedQuestions: [
-            'So sánh doanh thu giữa các tháng gần đây?',
-            'Phân tích nguyên nhân giao thất bại & cách khắc phục?',
-            'Đề xuất chiến lược tăng trưởng đơn hàng tháng tới?',
-          ],
-        };
-      } else {
-        logger.warn(`Gemini API model '${model}' returned empty text response`);
-        continue;
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text && text.trim().length > 0) {
+            return {
+              answer: text.trim(),
+              suggestedQuestions: [
+                'So sánh doanh thu giữa các tháng gần đây?',
+                'Phân tích nguyên nhân giao thất bại & cách khắc phục?',
+                'Đề xuất chiến lược tăng trưởng đơn hàng tháng tới?',
+              ],
+            };
+          } else {
+            logger.warn(`Gemini API model '${model}' returned empty text response`);
+            continue;
+          }
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.warn(`Gemini API request '${model}' failed or timed out: ${message}`);
+        } finally {
+          clearTimeout(timeoutId);
+        }
       }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.warn(`Gemini API request '${model}' failed or timed out: ${message}`);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
 
-  return null;
+      throw new Error('All Gemini candidate models failed or timed out');
+    },
+    () => null,
+  );
 }

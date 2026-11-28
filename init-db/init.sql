@@ -73,7 +73,7 @@ CREATE TABLE `drivers` (
     CONSTRAINT `fk_driver_user`          FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
     CONSTRAINT `chk_driver_weight`       CHECK (`max_weight_kg` > 0),
     CONSTRAINT `chk_driver_volume`       CHECK (`max_volume_m3` > 0),
-    CONSTRAINT `chk_driver_shift_status` CHECK (`current_shift_status` IN ('OFFLINE', 'ONLINE_READY', 'BUSY'))
+    CONSTRAINT `chk_driver_shift_status` CHECK (`current_shift_status` IN ('OFFLINE', 'ONLINE_READY', 'BUSY', 'ON_DUTY'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 3. BẢNG KHU VỰC GIAO HÀNG (ZONES)
@@ -124,7 +124,7 @@ CREATE TABLE `shifts` (
     INDEX `idx_shifts_driver_status` (`driver_id`, `status`),
     CONSTRAINT `fk_shift_driver`        FOREIGN KEY (`driver_id`)     REFERENCES `drivers` (`user_id`) ON DELETE RESTRICT,
     CONSTRAINT `fk_shift_reconciled`    FOREIGN KEY (`reconciled_by`) REFERENCES `users`   (`id`)      ON DELETE SET NULL,
-    CONSTRAINT `chk_shift_status`       CHECK (`status` IN ('OPEN', 'CLOSED')),
+    CONSTRAINT `chk_shift_status`       CHECK (`status` IN ('OPEN', 'PENDING_SETTLEMENT', 'CLOSED')),
     CONSTRAINT `chk_shift_cod_collected` CHECK (`cod_collected` >= 0),
     CONSTRAINT `chk_shift_cod_submitted` CHECK (`cod_submitted` >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

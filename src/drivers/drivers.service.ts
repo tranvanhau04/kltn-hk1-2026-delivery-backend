@@ -6,9 +6,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not } from 'typeorm';
+import { Repository, Not, DataSource } from 'typeorm';
+import * as bcrypt from 'bcrypt';
+import * as ExcelJS from 'exceljs';
+import * as xlsx from 'xlsx';
+import { v4 as uuidv4 } from 'uuid';
 import { Driver, DriverShiftStatus } from '../entities/driver.entity';
-import { User, UserRole } from '../entities/user.entity';
+import { User, UserRole, UserStatus } from '../entities/user.entity';
 import { Depot } from '../entities/depot.entity';
 import { Zone } from '../entities/zone.entity';
 import { ZoneDriver } from '../entities/zone-driver.entity';
@@ -17,7 +21,80 @@ import { Shift, ShiftStatus } from '../entities/shift.entity';
 import { Route } from '../entities/route.entity';
 import { Stop } from '../entities/stop.entity';
 import type { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
-import { CreateDriverDto, UpdateDriverDto, UpdateShiftStatusDto, QueryDriverDto } from './dto';
+import {
+  CreateDriverDto,
+  CreateDriverAccountDto,
+  UpdateDriverDto,
+  UpdateShiftStatusDto,
+  QueryDriverDto,
+} from './dto';
+
+export interface DriverExcelImportRowError {
+  row: number;
+  field?: string;
+  message: string;
+}
+
+export interface DriverExcelImportResult {
+  totalRows: number;
+  successCount: number;
+  failedCount: number;
+  errors: DriverExcelImportRowError[];
+}
+
+const DRIVER_EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+const DRIVER_PHONE_REGEX = /^(0|\+84)[35789][0-9]{8}$/;
+const VALID_VEHICLE_TYPES = ['MOTORBIKE', 'VAN_500KG', 'TRUCK_1TON', 'TRUCK_2TON'] as const;
+
+function extractDriverCellString(
+  value: ExcelJS.CellValue,
+  preservePhoneLeadingZero = false,
+): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number') {
+    const numStr = String(value).trim();
+    if (preservePhoneLeadingZero && /^[35789][0-9]{8}$/.test(numStr)) {
+      return `0${numStr}`;
+    }
+    return numStr;
+  }
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'boolean') return String(value);
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'object') {
+    if ('text' in value && typeof value.text === 'string') {
+      return value.text.trim();
+    }
+    if ('richText' in value && Array.isArray(value.richText)) {
+      return value.richText
+        .map((part) => (typeof part.text === 'string' ? part.text : ''))
+        .join('')
+        .trim();
+    }
+    if ('result' in value && value.result !== undefined && value.result !== null) {
+      if (typeof value.result === 'object' && 'error' in value.result) {
+        return '';
+      }
+      return extractDriverCellString(value.result, preservePhoneLeadingZero);
+    }
+  }
+  return '';
+}
+
+function normalizeDriverHeaderKey(rawHeader: string): string {
+  return rawHeader
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeDepotLookupKey(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').toLowerCase();
+}
 
 interface DriverRawRow {
   userId: string;
@@ -55,6 +132,7 @@ export class DriversService {
     private readonly routeRepo: Repository<Route>,
     @InjectRepository(Stop)
     private readonly stopRepo: Repository<Stop>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async findAllUnpaginated(): Promise<Driver[]> {
@@ -507,13 +585,14 @@ export class DriversService {
       );
     }
 
-    const total = await qb.getCount();
-
-    const rawData = await qb
-      .orderBy('driver.license_plate', 'ASC')
-      .offset(skip)
-      .limit(limit)
-      .getRawMany<DriverRawRow>();
+    const [total, rawData] = await Promise.all([
+      qb.clone().getCount(),
+      qb
+        .orderBy('driver.license_plate', 'ASC')
+        .offset(skip)
+        .limit(limit)
+        .getRawMany<DriverRawRow>(),
+    ]);
 
     const formattedData = rawData.map((d: DriverRawRow) => ({
       userId: d.userId,
@@ -580,9 +659,86 @@ export class DriversService {
   }
 
   /**
+   * POST /api/drivers
+   * Atomically creates a User (strictly role = DRIVER) and linked Driver profile
+   * inside a single TypeORM transaction. Accessible by ADMIN and DISPATCHER.
+   */
+  async createDriverAccount(dto: CreateDriverAccountDto) {
+    const email = dto.email?.trim().toLowerCase() || `driver.${dto.phone.trim()}@smartexpress.vn`;
+
+    const existingEmail = await this.userRepo.findOne({ where: { email } });
+    if (existingEmail) {
+      throw new ConflictException(`Email '${email}' đã tồn tại trong hệ thống`);
+    }
+
+    const existingPhone = await this.userRepo.findOne({ where: { phone: dto.phone } });
+    if (existingPhone) {
+      throw new ConflictException(`Số điện thoại '${dto.phone}' đã tồn tại trong hệ thống`);
+    }
+
+    const existingPlate = await this.driverRepo.findOne({
+      where: { licensePlate: dto.licensePlate },
+    });
+    if (existingPlate) {
+      throw new ConflictException(
+        `License plate '${dto.licensePlate}' is already assigned to another driver`,
+      );
+    }
+
+    if (dto.depotId) {
+      const depot = await this.depotRepo.findOne({ where: { id: dto.depotId } });
+      if (!depot) {
+        throw new NotFoundException(`Depot with ID '${dto.depotId}' not found`);
+      }
+    }
+
+    const rawPassword = dto.password || 'Password123!';
+    const passwordHash = await bcrypt.hash(rawPassword, 10);
+
+    return this.dataSource.transaction(async (manager) => {
+      const userId = uuidv4();
+      const user = manager.create(User, {
+        id: userId,
+        fullName: dto.fullName,
+        email,
+        phone: dto.phone,
+        passwordHash,
+        role: UserRole.DRIVER,
+        status: UserStatus.ACTIVE,
+      });
+      const savedUser = await manager.save(User, user);
+
+      const driver = manager.create(Driver, {
+        userId: savedUser.id,
+        depotId: dto.depotId ?? null,
+        licensePlate: dto.licensePlate,
+        vehicleType: dto.vehicleType,
+        maxWeightKg: dto.maxWeightKg,
+        maxVolumeM3: dto.maxVolumeM3,
+        currentShiftStatus: dto.currentShiftStatus || DriverShiftStatus.OFFLINE,
+      });
+      const savedDriver = await manager.save(Driver, driver);
+
+      return {
+        ...savedDriver,
+        maxWeightKg: Number(savedDriver.maxWeightKg),
+        maxVolumeM3: Number(savedDriver.maxVolumeM3),
+        user: {
+          id: savedUser.id,
+          fullName: savedUser.fullName,
+          email: savedUser.email,
+          phone: savedUser.phone,
+          role: savedUser.role,
+          status: savedUser.status,
+        },
+      };
+    });
+  }
+
+  /**
    * POST /api/drivers/:userId
    * Configure vehicle specifications for a driver.
-   * Access: ADMIN only.
+   * Access: ADMIN, DISPATCHER.
    */
   async create(userId: string, dto: CreateDriverDto) {
     const user = await this.userRepo.findOne({ where: { id: userId } });
@@ -899,6 +1055,541 @@ export class DriversService {
         week: buildSummary(weekItems),
         month: buildSummary(monthItems),
       },
+    };
+  }
+
+  /**
+   * Generates a sample .xlsx workbook for Drivers bulk import.
+   */
+  async generateImportTemplate(): Promise<ExcelJS.Workbook> {
+    const depots = (await this.depotRepo.find({ take: 2 })) || [];
+    const depot1Name = depots[0]?.name || 'Hub 01 - Gò Vấp';
+    const depot2Name = depots[1]?.name || depot1Name;
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'SmartExpress Admin';
+    workbook.created = new Date();
+
+    const sheet = workbook.addWorksheet('Drivers Import');
+    sheet.columns = [
+      { header: 'Họ và tên', key: 'fullName', width: 26 },
+      { header: 'Email', key: 'email', width: 30 },
+      { header: 'Số điện thoại', key: 'phone', width: 18, style: { numFmt: '@' } },
+      { header: 'Biển số xe', key: 'licensePlate', width: 18 },
+      { header: 'Loại xe', key: 'vehicleType', width: 20 },
+      { header: 'Tải trọng (kg)', key: 'maxWeightKg', width: 16 },
+      { header: 'Thể tích (m³)', key: 'maxVolumeM3', width: 16 },
+      { header: 'Tên Kho / Hub', key: 'depotName', width: 26 },
+      { header: 'Mật khẩu', key: 'password', width: 20, style: { numFmt: '@' } },
+    ];
+
+    const headerRow = sheet.getRow(1);
+    headerRow.height = 26;
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0F172A' },
+      };
+      cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    });
+
+    sheet.addRow({
+      fullName: 'Lê Hoàng Nam',
+      email: 'nam.le@smartexpress.vn',
+      phone: '0908112233',
+      licensePlate: '59G1-678.90',
+      vehicleType: 'MOTORBIKE',
+      maxWeightKg: 50,
+      maxVolumeM3: 0.2,
+      depotName: depot1Name,
+      password: '',
+    });
+
+    sheet.addRow({
+      fullName: 'Phạm Quốc Bảo',
+      email: 'bao.pham@smartexpress.vn',
+      phone: '0938445566',
+      licensePlate: '51D-246.80',
+      vehicleType: 'VAN_500KG',
+      maxWeightKg: 500,
+      maxVolumeM3: 4.2,
+      depotName: depot2Name,
+      password: '123456',
+    });
+
+    return workbook;
+  }
+
+  /**
+   * Bulk imports drivers sequentially from an Excel (.xlsx / .xls) file.
+   * Each valid row creates a User (role = DRIVER) and linked Driver inside an atomic TypeORM transaction.
+   */
+  async importExcel(file: Express.Multer.File): Promise<DriverExcelImportResult> {
+    if (!file || !file.buffer || file.buffer.length === 0) {
+      throw new BadRequestException('Vui lòng tải lên file Excel (.xlsx hoặc .xls) hợp lệ.');
+    }
+
+    const originalName = (file.originalname || '').toLowerCase().trim();
+    if (!originalName.endsWith('.xlsx') && !originalName.endsWith('.xls')) {
+      throw new BadRequestException(
+        'Định dạng file không hợp lệ. Chỉ chấp nhận file .xlsx hoặc .xls.',
+      );
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    try {
+      let xlsxBuffer: Buffer = file.buffer;
+      if (originalName.endsWith('.xls') && !originalName.endsWith('.xlsx')) {
+        const legacyWb = xlsx.read(file.buffer, { type: 'buffer' });
+        xlsxBuffer = xlsx.write(legacyWb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+      }
+      await workbook.xlsx.load(xlsxBuffer as unknown as ExcelJS.Buffer);
+    } catch {
+      throw new BadRequestException(
+        'Không thể đọc nội dung file Excel. Vui lòng kiểm tra lại định dạng file.',
+      );
+    }
+
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet || worksheet.rowCount < 2) {
+      throw new BadRequestException('File Excel không có dữ liệu tài xế để nhập.');
+    }
+
+    // Resolve column indices from header row (with positional fallback 1..9)
+    const colMap = {
+      fullName: 1,
+      email: 2,
+      phone: 3,
+      licensePlate: 4,
+      vehicleType: 5,
+      maxWeightKg: 6,
+      maxVolumeM3: 7,
+      depotName: 8,
+      password: 9,
+    };
+
+    const headerRow = worksheet.getRow(1);
+    headerRow.eachCell((cell, colNumber) => {
+      const normalized = normalizeDriverHeaderKey(extractDriverCellString(cell.value));
+      if (
+        normalized.includes('ho va ten') ||
+        normalized.includes('ho ten') ||
+        normalized === 'fullname' ||
+        normalized === 'full_name'
+      ) {
+        colMap.fullName = colNumber;
+      } else if (normalized.includes('email')) {
+        colMap.email = colNumber;
+      } else if (
+        normalized.includes('so dien thoai') ||
+        normalized.includes('dien thoai') ||
+        normalized === 'phone' ||
+        normalized === 'sdt'
+      ) {
+        colMap.phone = colNumber;
+      } else if (
+        normalized.includes('bien so') ||
+        normalized === 'licenseplate' ||
+        normalized === 'license_plate'
+      ) {
+        colMap.licensePlate = colNumber;
+      } else if (
+        normalized.includes('loai xe') ||
+        normalized.includes('phuong tien') ||
+        normalized === 'vehicletype' ||
+        normalized === 'vehicle_type'
+      ) {
+        colMap.vehicleType = colNumber;
+      } else if (
+        normalized.includes('tai trong') ||
+        normalized === 'maxweightkg' ||
+        normalized === 'max_weight_kg'
+      ) {
+        colMap.maxWeightKg = colNumber;
+      } else if (
+        normalized.includes('the tich') ||
+        normalized === 'maxvolumem3' ||
+        normalized === 'max_volume_m3'
+      ) {
+        colMap.maxVolumeM3 = colNumber;
+      } else if (
+        normalized.includes('ten kho') ||
+        normalized.includes('hub') ||
+        normalized.includes('depot') ||
+        normalized === 'kho'
+      ) {
+        colMap.depotName = colNumber;
+      } else if (normalized.includes('mat khau') || normalized.startsWith('password')) {
+        colMap.password = colNumber;
+      }
+    });
+
+    interface ParsedDriverRow {
+      rowNumber: number;
+      fullName: string;
+      email: string;
+      phone: string;
+      licensePlate: string;
+      vehicleType: string;
+      weightRaw: string;
+      volumeRaw: string;
+      depotNameRaw: string;
+      passwordRaw: string;
+    }
+
+    const dataRows: ParsedDriverRow[] = [];
+    for (let r = 2; r <= worksheet.rowCount; r++) {
+      const row = worksheet.getRow(r);
+      const fullName = extractDriverCellString(row.getCell(colMap.fullName).value);
+      const email = extractDriverCellString(row.getCell(colMap.email).value).toLowerCase();
+      const phone = extractDriverCellString(row.getCell(colMap.phone).value, true);
+      const licensePlate = extractDriverCellString(
+        row.getCell(colMap.licensePlate).value,
+      ).toUpperCase();
+      const vehicleType = extractDriverCellString(
+        row.getCell(colMap.vehicleType).value,
+      ).toUpperCase();
+      const weightRaw = extractDriverCellString(row.getCell(colMap.maxWeightKg).value);
+      const volumeRaw = extractDriverCellString(row.getCell(colMap.maxVolumeM3).value);
+      const depotNameRaw = extractDriverCellString(row.getCell(colMap.depotName).value);
+      const passwordRaw = extractDriverCellString(row.getCell(colMap.password).value);
+
+      if (
+        !fullName &&
+        !email &&
+        !phone &&
+        !licensePlate &&
+        !vehicleType &&
+        !weightRaw &&
+        !volumeRaw &&
+        !depotNameRaw &&
+        !passwordRaw
+      ) {
+        continue;
+      }
+
+      dataRows.push({
+        rowNumber: r,
+        fullName,
+        email,
+        phone,
+        licensePlate,
+        vehicleType,
+        weightRaw,
+        volumeRaw,
+        depotNameRaw,
+        passwordRaw,
+      });
+    }
+
+    if (dataRows.length === 0) {
+      throw new BadRequestException(
+        'File Excel không có dòng dữ liệu nào hợp lệ (tất cả các dòng đều trống).',
+      );
+    }
+
+    // Preload Depots, Users (email/phone), and Drivers (licensePlate)
+    const [allDepots, existingUsers, existingDrivers] = await Promise.all([
+      this.depotRepo.find(),
+      this.userRepo.find({ select: ['email', 'phone'] }),
+      this.driverRepo.find({ select: ['licensePlate'] }),
+    ]);
+
+    const depotByName = new Map<string, Depot>();
+    for (const d of allDepots) {
+      if (d.name) {
+        depotByName.set(normalizeDepotLookupKey(d.name), d);
+      }
+    }
+    const availableDepotNames = allDepots.map((d) => d.name).filter(Boolean);
+
+    const dbEmails = new Set(existingUsers.map((u) => (u.email || '').trim().toLowerCase()));
+    const dbPhones = new Set(existingUsers.map((u) => (u.phone || '').trim()));
+    const dbPlates = new Set(
+      existingDrivers.map((d) => (d.licensePlate || '').trim().toUpperCase()),
+    );
+
+    const seenEmails = new Map<string, number>();
+    const seenPhones = new Map<string, number>();
+    const seenPlates = new Map<string, number>();
+    const allowedVehicleTypes = new Set<string>(VALID_VEHICLE_TYPES);
+
+    let successCount = 0;
+    let failedCount = 0;
+    const errors: DriverExcelImportRowError[] = [];
+
+    for (const item of dataRows) {
+      const {
+        rowNumber,
+        fullName,
+        email,
+        phone,
+        licensePlate,
+        vehicleType,
+        weightRaw,
+        volumeRaw,
+        depotNameRaw,
+        passwordRaw,
+      } = item;
+
+      // Track intra-file duplicates
+      const prevEmailRow = email ? seenEmails.get(email) : undefined;
+      if (email && prevEmailRow === undefined) {
+        seenEmails.set(email, rowNumber);
+      }
+
+      const prevPhoneRow = phone ? seenPhones.get(phone) : undefined;
+      if (phone && prevPhoneRow === undefined) {
+        seenPhones.set(phone, rowNumber);
+      }
+
+      const prevPlateRow = licensePlate ? seenPlates.get(licensePlate) : undefined;
+      if (licensePlate && prevPlateRow === undefined) {
+        seenPlates.set(licensePlate, rowNumber);
+      }
+
+      if (!fullName) {
+        failedCount++;
+        errors.push({ row: rowNumber, field: 'fullName', message: 'Thiếu Họ và tên tài xế.' });
+        continue;
+      }
+      if (fullName.length > 100) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'fullName',
+          message: 'Họ và tên không được vượt quá 100 ký tự.',
+        });
+        continue;
+      }
+
+      if (!email) {
+        failedCount++;
+        errors.push({ row: rowNumber, field: 'email', message: 'Thiếu địa chỉ Email.' });
+        continue;
+      }
+      if (email.length > 150 || !DRIVER_EMAIL_REGEX.test(email)) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'email',
+          message: `Email '${email}' không đúng định dạng.`,
+        });
+        continue;
+      }
+      if (prevEmailRow !== undefined) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'email',
+          message: `Email '${email}' bị trùng với dòng ${prevEmailRow} trong cùng file Excel.`,
+        });
+        continue;
+      }
+      if (dbEmails.has(email)) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'email',
+          message: `Email '${email}' đã tồn tại trong hệ thống.`,
+        });
+        continue;
+      }
+
+      if (!phone) {
+        failedCount++;
+        errors.push({ row: rowNumber, field: 'phone', message: 'Thiếu Số điện thoại.' });
+        continue;
+      }
+      if (!DRIVER_PHONE_REGEX.test(phone)) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'phone',
+          message: `Số điện thoại '${phone}' không hợp lệ (cần 10 số di động VN bắt đầu bằng 03, 05, 07, 08, 09).`,
+        });
+        continue;
+      }
+      if (prevPhoneRow !== undefined) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'phone',
+          message: `Số điện thoại '${phone}' bị trùng với dòng ${prevPhoneRow} trong cùng file Excel.`,
+        });
+        continue;
+      }
+      if (dbPhones.has(phone)) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'phone',
+          message: `Số điện thoại '${phone}' đã tồn tại trong hệ thống.`,
+        });
+        continue;
+      }
+
+      if (!licensePlate) {
+        failedCount++;
+        errors.push({ row: rowNumber, field: 'licensePlate', message: 'Thiếu Biển số xe.' });
+        continue;
+      }
+      if (licensePlate.length > 20) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'licensePlate',
+          message: 'Biển số xe không được vượt quá 20 ký tự.',
+        });
+        continue;
+      }
+      if (prevPlateRow !== undefined) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'licensePlate',
+          message: `Biển số xe '${licensePlate}' bị trùng với dòng ${prevPlateRow} trong cùng file Excel.`,
+        });
+        continue;
+      }
+      if (dbPlates.has(licensePlate)) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'licensePlate',
+          message: `Biển số xe '${licensePlate}' đã được đăng ký cho tài xế khác.`,
+        });
+        continue;
+      }
+
+      if (!vehicleType || !allowedVehicleTypes.has(vehicleType)) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'vehicleType',
+          message: `Loại xe '${vehicleType || '(trống)'}' không hợp lệ. Chỉ chấp nhận: ${VALID_VEHICLE_TYPES.join(', ')}.`,
+        });
+        continue;
+      }
+
+      const maxWeightKg = Number(weightRaw.replace(',', '.'));
+      if (
+        !weightRaw ||
+        Number.isNaN(maxWeightKg) ||
+        !Number.isFinite(maxWeightKg) ||
+        maxWeightKg <= 0
+      ) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'maxWeightKg',
+          message: `Tải trọng (kg) '${weightRaw || '(trống)'}' không hợp lệ (phải là số > 0).`,
+        });
+        continue;
+      }
+
+      const maxVolumeM3 = Number(volumeRaw.replace(',', '.'));
+      if (
+        !volumeRaw ||
+        Number.isNaN(maxVolumeM3) ||
+        !Number.isFinite(maxVolumeM3) ||
+        maxVolumeM3 <= 0
+      ) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'maxVolumeM3',
+          message: `Thể tích (m³) '${volumeRaw || '(trống)'}' không hợp lệ (phải là số > 0).`,
+        });
+        continue;
+      }
+
+      if (!depotNameRaw) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'depotName',
+          message: 'Thiếu Tên Kho / Hub trực thuộc.',
+        });
+        continue;
+      }
+
+      const matchedDepot = depotByName.get(normalizeDepotLookupKey(depotNameRaw));
+      if (!matchedDepot) {
+        failedCount++;
+        const hint =
+          availableDepotNames.length > 0
+            ? ` Các kho hợp lệ: ${availableDepotNames.slice(0, 5).join(', ')}.`
+            : '';
+        errors.push({
+          row: rowNumber,
+          field: 'depotName',
+          message: `Không tìm thấy Kho / Hub '${depotNameRaw}'.${hint}`,
+        });
+        continue;
+      }
+
+      const finalPassword = passwordRaw || '123456';
+      if (finalPassword.length < 6) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          field: 'password',
+          message: 'Mật khẩu phải có ít nhất 6 ký tự (hoặc để trống để dùng mặc định 123456).',
+        });
+        continue;
+      }
+
+      try {
+        const passwordHash = await bcrypt.hash(finalPassword, 10);
+        await this.dataSource.transaction(async (manager) => {
+          const userId = uuidv4();
+          const newUser = manager.create(User, {
+            id: userId,
+            fullName,
+            email,
+            phone,
+            passwordHash,
+            role: UserRole.DRIVER,
+            status: UserStatus.ACTIVE,
+          });
+          await manager.save(User, newUser);
+
+          const newDriver = manager.create(Driver, {
+            userId,
+            depotId: matchedDepot.id,
+            licensePlate,
+            vehicleType,
+            maxWeightKg: Number(maxWeightKg.toFixed(2)),
+            maxVolumeM3: Number(maxVolumeM3.toFixed(3)),
+            currentShiftStatus: DriverShiftStatus.OFFLINE,
+          });
+          await manager.save(Driver, newDriver);
+        });
+
+        dbEmails.add(email);
+        dbPhones.add(phone);
+        dbPlates.add(licensePlate);
+        successCount++;
+      } catch (err: unknown) {
+        failedCount++;
+        errors.push({
+          row: rowNumber,
+          message:
+            err instanceof Error
+              ? `Lỗi giao dịch lưu tài xế: ${err.message}`
+              : 'Không thể lưu hồ sơ tài xế.',
+        });
+      }
+    }
+
+    return {
+      totalRows: dataRows.length,
+      successCount,
+      failedCount,
+      errors,
     };
   }
 }

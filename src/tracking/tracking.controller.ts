@@ -10,7 +10,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, Not } from 'typeorm';
 import { TrackingLog } from '../entities/tracking-log.entity';
 import { Driver } from '../entities/driver.entity';
 import { Route } from '../entities/route.entity';
@@ -83,80 +83,112 @@ export class TrackingController {
   @Get('tracking/live')
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   async liveTracking() {
-    // Get all non-offline drivers
-    const drivers = await this.driverRepo.find();
-    const activeDrivers = drivers.filter((d) => d.currentShiftStatus !== 'OFFLINE');
+    // 1. Fetch only non-offline drivers directly in SQL
+    const activeDrivers = await this.driverRepo.find({
+      where: { currentShiftStatus: Not('OFFLINE') },
+    });
 
-    const result = await Promise.all(
-      activeDrivers.map(async (driver) => {
-        const user = await this.userRepo.findOne({ where: { id: driver.userId } });
+    if (activeDrivers.length === 0) {
+      return [];
+    }
 
-        // Latest tracking log — must be real device GPS only
-        const latestLog = await this.logRepo.findOne({
-          where: { driverId: driver.userId },
-          order: { timestamp: 'DESC' },
-        });
+    const driverIds = activeDrivers.map((d) => d.userId);
 
-        // Active route (ASSIGNED, IN_PROGRESS, PLANNED, CONFIRMED) ignoring date for testing
-        const activeRoute = await this.routeRepo.findOne({
-          where: [
-            { driverId: driver.userId, status: 'ASSIGNED' },
-            { driverId: driver.userId, status: 'IN_PROGRESS' },
-            { driverId: driver.userId, status: 'PLANNED' },
-            { driverId: driver.userId, status: 'CONFIRMED' },
-          ],
-          order: { routeDate: 'DESC', createdAt: 'DESC' },
-        });
-
-        let polyline: [number, number][] = [];
-        if (activeRoute?.polyline) {
-          try {
-            polyline = JSON.parse(activeRoute.polyline) as [number, number][];
-          } catch {
-            polyline = [];
-          }
-        }
-
-        // Determine real GPS position — NEVER use Math.random() or generated coordinates.
-        // Only use actual values from the tracking_logs table.
-        const hasRealGps =
-          latestLog &&
-          latestLog.latitude != null &&
-          latestLog.longitude != null &&
-          Number(latestLog.latitude) !== 0 &&
-          Number(latestLog.longitude) !== 0;
-
-        const currentLat: number | null = hasRealGps ? Number(latestLog.latitude) : null;
-        const currentLng: number | null = hasRealGps ? Number(latestLog.longitude) : null;
-        const positionUnknown = !hasRealGps;
-
-        return {
-          driverId: driver.userId,
-          fullName: user?.fullName ?? 'Unknown',
-          phone: user?.phone ?? '',
-          licensePlate: driver.licensePlate,
-          vehicleType: driver.vehicleType,
-          currentShiftStatus: driver.currentShiftStatus,
-          // null when no real GPS data — frontend must handle this gracefully
-          currentLat,
-          currentLng,
-          // true when driver has no real GPS ping yet
-          positionUnknown,
-          lastUpdated: latestLog?.timestamp ?? null,
-          activeRoute: activeRoute
-            ? {
-                routeId: activeRoute.id,
-                totalDistanceKm: Number(activeRoute.totalDistanceKm),
-                totalEstimatedTimeMin: Number(activeRoute.totalEstimatedTimeMin),
-                status: activeRoute.status,
-                polyline,
-              }
-            : null,
-        };
+    // 2. Batch-fetch users, latest GPS ping per driver, and active routes in parallel (4 queries total instead of 1 + 3N)
+    const [users, latestLogs, activeRoutes] = await Promise.all([
+      this.userRepo.find({
+        where: { id: In(driverIds) },
+        select: ['id', 'fullName', 'phone'],
       }),
-    );
+      this.logRepo
+        .createQueryBuilder('log')
+        .innerJoin(
+          (sub) =>
+            sub
+              .select('tl.driver_id', 'driverId')
+              .addSelect('MAX(tl.timestamp)', 'maxTs')
+              .from(TrackingLog, 'tl')
+              .where('tl.driver_id IN (:...driverIds)', { driverIds })
+              .groupBy('tl.driver_id'),
+          'latest',
+          'latest.driverId = log.driver_id AND latest.maxTs = log.timestamp',
+        )
+        .where('log.driver_id IN (:...driverIds)', { driverIds })
+        .orderBy('log.timestamp', 'DESC')
+        .getMany(),
+      this.routeRepo.find({
+        where: {
+          driverId: In(driverIds),
+          status: In(['ASSIGNED', 'IN_PROGRESS', 'PLANNED', 'CONFIRMED']),
+        },
+        order: { routeDate: 'DESC', createdAt: 'DESC' },
+      }),
+    ]);
 
-    return result;
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    const latestLogMap = new Map<string, TrackingLog>();
+    for (const log of latestLogs) {
+      if (!latestLogMap.has(log.driverId)) {
+        latestLogMap.set(log.driverId, log);
+      }
+    }
+
+    const activeRouteMap = new Map<string, Route>();
+    for (const r of activeRoutes) {
+      if (!activeRouteMap.has(r.driverId)) {
+        activeRouteMap.set(r.driverId, r);
+      }
+    }
+
+    return activeDrivers.map((driver) => {
+      const user = userMap.get(driver.userId);
+      const latestLog = latestLogMap.get(driver.userId);
+      const activeRoute = activeRouteMap.get(driver.userId);
+
+      let polyline: [number, number][] = [];
+      if (activeRoute?.polyline) {
+        try {
+          polyline = JSON.parse(activeRoute.polyline) as [number, number][];
+        } catch {
+          polyline = [];
+        }
+      }
+
+      // Determine real GPS position — NEVER use Math.random() or generated coordinates.
+      const hasRealGps =
+        latestLog &&
+        latestLog.latitude != null &&
+        latestLog.longitude != null &&
+        Number(latestLog.latitude) !== 0 &&
+        Number(latestLog.longitude) !== 0;
+
+      const currentLat: number | null = hasRealGps ? Number(latestLog.latitude) : null;
+      const currentLng: number | null = hasRealGps ? Number(latestLog.longitude) : null;
+      const positionUnknown = !hasRealGps;
+
+      return {
+        driverId: driver.userId,
+        fullName: user?.fullName ?? 'Unknown',
+        phone: user?.phone ?? '',
+        licensePlate: driver.licensePlate,
+        vehicleType: driver.vehicleType,
+        currentShiftStatus: driver.currentShiftStatus,
+        currentLat,
+        currentLng,
+        positionUnknown,
+        lastUpdated: latestLog?.timestamp ?? null,
+        activeRoute: activeRoute
+          ? {
+              routeId: activeRoute.id,
+              totalDistanceKm: Number(activeRoute.totalDistanceKm),
+              totalEstimatedTimeMin: Number(activeRoute.totalEstimatedTimeMin),
+              status: activeRoute.status,
+              polyline,
+            }
+          : null,
+      };
+    });
   }
 
   /**
