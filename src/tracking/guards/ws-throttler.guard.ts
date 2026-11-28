@@ -24,8 +24,8 @@ export class WsThrottlerGuard implements CanActivate {
   // Fast in-memory sliding window tracker: Map<trackerKey, timestamp[]>
   private readonly timestampsMap = new Map<string, number[]>();
 
-  // Rate limit settings: exactly 20 requests per minute (60,000 ms)
-  private readonly limit = 20;
+  // Rate limit settings: 120 requests per minute (60,000 ms)
+  private readonly limit = 120;
   private readonly ttlMs = 60000;
 
   constructor(
@@ -59,10 +59,10 @@ export class WsThrottlerGuard implements CanActivate {
           );
           client.emit('error', {
             code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Rate limit exceeded: maximum 20 requests per minute for update_location',
+            message: `Rate limit exceeded: maximum ${this.limit} requests per minute for update_location`,
             retryAfter: timeToBlockExpire,
           });
-          throw new WsException('Rate limit exceeded: maximum 20 requests per minute');
+          throw new WsException(`Rate limit exceeded: maximum ${this.limit} requests per minute`);
         }
 
         return true;
@@ -74,7 +74,7 @@ export class WsThrottlerGuard implements CanActivate {
       }
     }
 
-    // 2. In-memory sliding log check (guarantees exactly 20 requests per 60 seconds)
+    // 2. In-memory sliding log check (guarantees 120 requests per 60 seconds)
     const now = Date.now();
     const timestamps = this.timestampsMap.get(tracker) || [];
 
@@ -91,11 +91,11 @@ export class WsThrottlerGuard implements CanActivate {
 
       client.emit('error', {
         code: 'RATE_LIMIT_EXCEEDED',
-        message: 'Rate limit exceeded: maximum 20 requests per minute for update_location',
+        message: `Rate limit exceeded: maximum ${this.limit} requests per minute for update_location`,
         retryAfter: retryAfterSec,
       });
 
-      throw new WsException('Rate limit exceeded: maximum 20 requests per minute');
+      throw new WsException(`Rate limit exceeded: maximum ${this.limit} requests per minute`);
     }
 
     activeTimestamps.push(now);

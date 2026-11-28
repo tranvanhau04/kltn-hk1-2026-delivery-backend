@@ -115,45 +115,20 @@ export class ZonesService {
 
   // ─── Compute Overload ───────────────────────────────────────────────────────
 
-  /**
-   * Real-world fleet overload algorithm:
-   * 1. Aggregate pending orders (NEW | ASSIGNED) in the zone.
-   * 2. Aggregate capacity of assigned active drivers.
-   * 3. Compute utilization ratios and severity.
-   */
-  async computeOverload(zoneId: string): Promise<ZoneOverloadMetrics> {
-    // 1. Pending demand in zone
-    const pendingOrders = await this.orderRepo.find({
-      where: { zoneId, status: In(['NEW', 'ASSIGNED']) },
-    });
+  private buildOverloadMetricsFromAggregates(
+    totalOrders: number,
+    demandWeight: number,
+    demandVolume: number,
+    assignedDrivers: Pick<Driver, 'currentShiftStatus' | 'maxWeightKg' | 'maxVolumeM3'>[],
+  ): ZoneOverloadMetrics {
+    const activeDrivers = assignedDrivers.filter((d) =>
+      ACTIVE_SHIFT_STATUSES.includes(d.currentShiftStatus),
+    );
 
-    const totalOrders = pendingOrders.length;
-    const demandWeight = pendingOrders.reduce((sum, o) => sum + Number(o.weightKg), 0);
-    const demandVolume = pendingOrders.reduce((sum, o) => sum + Number(o.volumeM3), 0);
+    const activeDriversCount = activeDrivers.length;
+    const fleetCapacityWeight = activeDrivers.reduce((sum, d) => sum + Number(d.maxWeightKg), 0);
+    const fleetCapacityVolume = activeDrivers.reduce((sum, d) => sum + Number(d.maxVolumeM3), 0);
 
-    // 2. Assigned active drivers
-    const zonDriverRows = await this.zoneDriverRepo.find({ where: { zoneId } });
-    const assignedDriverIds = zonDriverRows.map((zd) => zd.driverId);
-
-    let fleetCapacityWeight = 0;
-    let fleetCapacityVolume = 0;
-    let activeDriversCount = 0;
-
-    if (assignedDriverIds.length > 0) {
-      const assignedDrivers = await this.driverRepo.find({
-        where: { userId: In(assignedDriverIds) },
-      });
-
-      const activeDrivers = assignedDrivers.filter((d) =>
-        ACTIVE_SHIFT_STATUSES.includes(d.currentShiftStatus),
-      );
-
-      activeDriversCount = activeDrivers.length;
-      fleetCapacityWeight = activeDrivers.reduce((sum, d) => sum + Number(d.maxWeightKg), 0);
-      fleetCapacityVolume = activeDrivers.reduce((sum, d) => sum + Number(d.maxVolumeM3), 0);
-    }
-
-    // 3. Ratios (prevent division by zero with logistics-safe defaults)
     const weightRatio =
       fleetCapacityWeight > 0 ? demandWeight / fleetCapacityWeight : demandWeight > 0 ? 999 : 0;
 
@@ -171,7 +146,6 @@ export class ZonesService {
     } else if (weightRatio > WARNING_RATIO || volumeRatio > WARNING_RATIO) {
       overloadSeverity = 'WARNING';
     } else if (totalOrders > 0 && activeDriversCount === 0) {
-      // Has orders but zero active drivers → treat as critical
       overloadSeverity = 'CRITICAL';
     }
 
@@ -189,11 +163,144 @@ export class ZonesService {
     };
   }
 
+  private parseStoredGeoJson(raw: unknown): object | null {
+    if (!raw) return null;
+    if (typeof raw === 'object') return raw;
+    if (typeof raw === 'string' && raw.trim() !== '') {
+      try {
+        return JSON.parse(raw) as object;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Real-world fleet overload algorithm:
+   * 1. Aggregate pending orders (NEW | ASSIGNED) in the zone via SQL SUM/COUNT.
+   * 2. Aggregate capacity of assigned active drivers.
+   * 3. Compute utilization ratios and severity.
+   */
+  async computeOverload(zoneId: string): Promise<ZoneOverloadMetrics> {
+    const [orderAgg, zonDriverRows] = await Promise.all([
+      this.orderRepo
+        .createQueryBuilder('o')
+        .select('COUNT(o.id)', 'totalOrders')
+        .addSelect('COALESCE(SUM(o.weight_kg), 0)', 'demandWeight')
+        .addSelect('COALESCE(SUM(o.volume_m3), 0)', 'demandVolume')
+        .where('o.zone_id = :zoneId', { zoneId })
+        .andWhere('o.status IN (:...statuses)', { statuses: ['NEW', 'ASSIGNED'] })
+        .getRawOne<{
+          totalOrders?: string | number;
+          demandWeight?: string | number;
+          demandVolume?: string | number;
+        }>(),
+      this.zoneDriverRepo.find({ where: { zoneId } }),
+    ]);
+
+    const totalOrders = Number(orderAgg?.totalOrders) || 0;
+    const demandWeight = Number(orderAgg?.demandWeight) || 0;
+    const demandVolume = Number(orderAgg?.demandVolume) || 0;
+
+    const assignedDriverIds = zonDriverRows.map((zd) => zd.driverId);
+    const assignedDrivers =
+      assignedDriverIds.length > 0
+        ? await this.driverRepo.find({
+            where: { userId: In(assignedDriverIds) },
+            select: ['userId', 'currentShiftStatus', 'maxWeightKg', 'maxVolumeM3'],
+          })
+        : [];
+
+    return this.buildOverloadMetricsFromAggregates(
+      totalOrders,
+      demandWeight,
+      demandVolume,
+      assignedDrivers,
+    );
+  }
+
   // ─── Zone CRUD ──────────────────────────────────────────────────────────────
 
   async findAll(): Promise<ZoneWithMetrics[]> {
     const zones = await this.zoneRepo.find({ order: { createdAt: 'ASC' } });
-    return Promise.all(zones.map((z) => this.toZoneWithMetrics(z)));
+    if (zones.length === 0) return [];
+
+    const zoneIds = zones.map((z) => z.id);
+
+    // Batch-fetch order demand aggregates & driver assignments across ALL zones (eliminates 4Z N+1 queries)
+    const [orderAggRows, allZoneDrivers] = await Promise.all([
+      this.orderRepo
+        .createQueryBuilder('o')
+        .select('o.zone_id', 'zoneId')
+        .addSelect('COUNT(o.id)', 'totalOrders')
+        .addSelect('COALESCE(SUM(o.weight_kg), 0)', 'demandWeight')
+        .addSelect('COALESCE(SUM(o.volume_m3), 0)', 'demandVolume')
+        .where('o.zone_id IN (:...zoneIds)', { zoneIds })
+        .andWhere('o.status IN (:...statuses)', { statuses: ['NEW', 'ASSIGNED'] })
+        .groupBy('o.zone_id')
+        .getRawMany<{
+          zoneId: string;
+          totalOrders: string | number;
+          demandWeight: string | number;
+          demandVolume: string | number;
+        }>(),
+      this.zoneDriverRepo.find({ where: { zoneId: In(zoneIds) } }),
+    ]);
+
+    const uniqueDriverIds = [...new Set(allZoneDrivers.map((zd) => zd.driverId))];
+    const allDrivers =
+      uniqueDriverIds.length > 0
+        ? await this.driverRepo.find({
+            where: { userId: In(uniqueDriverIds) },
+            select: ['userId', 'currentShiftStatus', 'maxWeightKg', 'maxVolumeM3'],
+          })
+        : [];
+
+    const driverMap = new Map(allDrivers.map((d) => [d.userId, d]));
+    const orderAggMap = new Map(
+      orderAggRows.map((row) => [
+        row.zoneId,
+        {
+          totalOrders: Number(row.totalOrders) || 0,
+          demandWeight: Number(row.demandWeight) || 0,
+          demandVolume: Number(row.demandVolume) || 0,
+        },
+      ]),
+    );
+
+    const driversByZone = new Map<string, string[]>();
+    for (const zd of allZoneDrivers) {
+      const list = driversByZone.get(zd.zoneId) ?? [];
+      list.push(zd.driverId);
+      driversByZone.set(zd.zoneId, list);
+    }
+
+    return zones.map((zone) => {
+      const agg = orderAggMap.get(zone.id) ?? {
+        totalOrders: 0,
+        demandWeight: 0,
+        demandVolume: 0,
+      };
+      const assignedDriverIds = driversByZone.get(zone.id) ?? [];
+      const assignedDrivers = assignedDriverIds
+        .map((id) => driverMap.get(id))
+        .filter((d): d is Driver => Boolean(d));
+
+      return {
+        id: zone.id,
+        name: zone.name,
+        boundaryGeoJson: this.parseStoredGeoJson(zone.boundaryGeoJson),
+        createdAt: zone.createdAt,
+        assignedDriverIds,
+        metrics: this.buildOverloadMetricsFromAggregates(
+          agg.totalOrders,
+          agg.demandWeight,
+          agg.demandVolume,
+          assignedDrivers,
+        ),
+      };
+    });
   }
 
   async findOne(id: string): Promise<ZoneWithMetrics> {
@@ -340,34 +447,63 @@ export class ZonesService {
     return this.driverRepo.find({ where: { userId: In(driverIds) } });
   }
 
+  /**
+   * DELETE /zones/:id
+   * Safely unlinks orders and assigned drivers, then deletes the zone.
+   */
+  async remove(zoneId: string): Promise<{ success: boolean; deletedId: string }> {
+    const zone = await this.zoneRepo.findOne({ where: { id: zoneId } });
+    if (!zone) throw new NotFoundException(`Không tìm thấy khu vực với ID: ${zoneId}`);
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.update(Order, { zoneId }, { zoneId: null });
+      await manager.delete(ZoneDriver, { zoneId });
+      await manager.delete(Zone, { id: zoneId });
+    });
+
+    this.logger.log(`Deleted zone ${zoneId} (${zone.name})`);
+    return { success: true, deletedId: zoneId };
+  }
+
   // ─── Private Helpers ────────────────────────────────────────────────────────
 
   private async toZoneWithMetrics(zone: Zone): Promise<ZoneWithMetrics> {
-    const [metrics, zoneDriverRows] = await Promise.all([
-      this.computeOverload(zone.id),
-      this.zoneDriverRepo.find({ where: { zoneId: zone.id } }),
-    ]);
+    const zoneDriverRows = await this.zoneDriverRepo.find({ where: { zoneId: zone.id } });
+    const assignedDriverIds = zoneDriverRows.map((zd) => zd.driverId);
 
-    let parsedGeoJson: object | null = null;
-    if (zone.boundaryGeoJson) {
-      if (typeof zone.boundaryGeoJson === 'object') {
-        parsedGeoJson = zone.boundaryGeoJson;
-      } else if (typeof zone.boundaryGeoJson === 'string' && zone.boundaryGeoJson.trim() !== '') {
-        try {
-          parsedGeoJson = JSON.parse(zone.boundaryGeoJson) as object;
-        } catch {
-          parsedGeoJson = null;
-        }
-      }
-    }
+    const [orderAgg, assignedDrivers] = await Promise.all([
+      this.orderRepo
+        .createQueryBuilder('o')
+        .select('COUNT(o.id)', 'totalOrders')
+        .addSelect('COALESCE(SUM(o.weight_kg), 0)', 'demandWeight')
+        .addSelect('COALESCE(SUM(o.volume_m3), 0)', 'demandVolume')
+        .where('o.zone_id = :zoneId', { zoneId: zone.id })
+        .andWhere('o.status IN (:...statuses)', { statuses: ['NEW', 'ASSIGNED'] })
+        .getRawOne<{
+          totalOrders?: string | number;
+          demandWeight?: string | number;
+          demandVolume?: string | number;
+        }>(),
+      assignedDriverIds.length > 0
+        ? this.driverRepo.find({
+            where: { userId: In(assignedDriverIds) },
+            select: ['userId', 'currentShiftStatus', 'maxWeightKg', 'maxVolumeM3'],
+          })
+        : Promise.resolve([]),
+    ]);
 
     return {
       id: zone.id,
       name: zone.name,
-      boundaryGeoJson: parsedGeoJson,
+      boundaryGeoJson: this.parseStoredGeoJson(zone.boundaryGeoJson),
       createdAt: zone.createdAt,
-      assignedDriverIds: zoneDriverRows.map((zd) => zd.driverId),
-      metrics,
+      assignedDriverIds,
+      metrics: this.buildOverloadMetricsFromAggregates(
+        Number(orderAgg?.totalOrders) || 0,
+        Number(orderAgg?.demandWeight) || 0,
+        Number(orderAgg?.demandVolume) || 0,
+        assignedDrivers,
+      ),
     };
   }
 }

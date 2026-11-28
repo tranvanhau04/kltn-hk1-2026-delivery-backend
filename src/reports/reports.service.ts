@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
 import { Order, OrderStatus } from '../entities/order.entity';
@@ -8,11 +8,14 @@ import { ReconcileShiftDto } from './dto/reconcile-shift.dto';
 import { BulkReconcileShiftsDto } from './dto/bulk-reconcile-shifts.dto';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { S3Service } from '../s3/s3.service';
+import { ReportExporterFactory } from './exporters/report-exporter.factory';
 import * as ExcelJS from 'exceljs';
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
 
 @Injectable()
 export class ReportsService {
+  private readonly exporterFactory: ReportExporterFactory;
+
   constructor(
     @InjectRepository(Order)
     private readonly orderRepo: Repository<Order>,
@@ -22,7 +25,10 @@ export class ReportsService {
     private readonly driverRepo: Repository<Driver>,
     private readonly dataSource: DataSource,
     private readonly s3Service: S3Service,
-  ) {}
+    @Optional() exporterFactory?: ReportExporterFactory,
+  ) {
+    this.exporterFactory = exporterFactory ?? new ReportExporterFactory();
+  }
 
   private getDateRange(period: 'week' | 'month' | 'custom', startDate?: string, endDate?: string) {
     const now = new Date();
@@ -44,27 +50,58 @@ export class ReportsService {
   }
 
   async getDashboardStats() {
-    const totalOrders = await this.orderRepo.count();
+    // Run 3 lightweight parallel SQL aggregations instead of 5 sequential round-trips + full-table RAM scan
+    const [orderKpiRow, activeDrivers, dayAggRows] = await Promise.all([
+      this.orderRepo
+        .createQueryBuilder('o')
+        .select('COUNT(o.id)', 'totalOrders')
+        .addSelect(
+          `COALESCE(SUM(CASE WHEN o.status = :deliveredStatus THEN 1 ELSE 0 END), 0)`,
+          'deliveredCount',
+        )
+        .addSelect('COALESCE(SUM(o.codAmount), 0)', 'totalCOD')
+        .setParameter('deliveredStatus', OrderStatus.DELIVERED)
+        .getRawOne<{
+          totalOrders?: string | number;
+          deliveredCount?: string | number;
+          totalCOD?: string | number;
+        }>(),
+      this.driverRepo
+        .createQueryBuilder('driver')
+        .where('driver.current_shift_status != :status', { status: DriverShiftStatus.OFFLINE })
+        .getCount(),
+      this.orderRepo
+        .createQueryBuilder('o')
+        .select('DAYOFWEEK(o.created_at)', 'dow')
+        .addSelect('COUNT(o.id)', 'orders')
+        .addSelect(
+          `COALESCE(SUM(CASE WHEN o.status = :deliveredStatus THEN 1 ELSE 0 END), 0)`,
+          'delivered',
+        )
+        .addSelect(
+          `COALESCE(SUM(CASE WHEN o.status = :failedStatus THEN 1 ELSE 0 END), 0)`,
+          'failed',
+        )
+        .setParameters({
+          deliveredStatus: OrderStatus.DELIVERED,
+          failedStatus: OrderStatus.FAILED,
+        })
+        .groupBy('DAYOFWEEK(o.created_at)')
+        .getRawMany<{
+          dow: string | number;
+          orders: string | number;
+          delivered: string | number;
+          failed: string | number;
+        }>(),
+    ]);
 
-    const activeDrivers = await this.driverRepo
-      .createQueryBuilder('driver')
-      .where('driver.current_shift_status != :status', { status: DriverShiftStatus.OFFLINE })
-      .getCount();
-
-    const codResult = await this.orderRepo
-      .createQueryBuilder('order')
-      .select('SUM(order.codAmount)', 'total')
-      .getRawOne<{ total?: string | number }>();
-    const totalCOD = codResult?.total ? Number(codResult.total) : 0;
-
-    const deliveredCount = await this.orderRepo.count({
-      where: { status: OrderStatus.DELIVERED },
-    });
-
+    const totalOrders = Number(orderKpiRow?.totalOrders) || 0;
+    const deliveredCount = Number(orderKpiRow?.deliveredCount) || 0;
+    const totalCOD = Number(orderKpiRow?.totalCOD) || 0;
     const successRate =
       totalOrders > 0 ? Number(((deliveredCount / totalOrders) * 100).toFixed(1)) : 0;
 
-    // Group by day of week based on existing orders
+    // MySQL DAYOFWEEK returns 1 = Sunday ('CN'), 2 = Monday ('T2'), ..., 7 = Saturday ('T7')
     const daysOfWeek = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
     const dayCounts: Record<string, { orders: number; delivered: number; failed: number }> = {
       T2: { orders: 0, delivered: 0, failed: 0 },
@@ -76,19 +113,15 @@ export class ReportsService {
       CN: { orders: 0, delivered: 0, failed: 0 },
     };
 
-    const allOrders = await this.orderRepo.find({
-      select: ['id', 'status', 'createdAt'],
-    });
-
-    allOrders.forEach((o) => {
-      const d = o.createdAt ? new Date(o.createdAt) : new Date();
-      const dayLabel = daysOfWeek[d.getDay()];
-      if (dayCounts[dayLabel]) {
-        dayCounts[dayLabel].orders += 1;
-        if (o.status === OrderStatus.DELIVERED) dayCounts[dayLabel].delivered += 1;
-        if (o.status === OrderStatus.FAILED) dayCounts[dayLabel].failed += 1;
+    for (const row of dayAggRows) {
+      const dowIdx = (Number(row.dow) || 1) - 1;
+      const dayLabel = daysOfWeek[dowIdx];
+      if (dayLabel && dayCounts[dayLabel]) {
+        dayCounts[dayLabel].orders += Number(row.orders) || 0;
+        dayCounts[dayLabel].delivered += Number(row.delivered) || 0;
+        dayCounts[dayLabel].failed += Number(row.failed) || 0;
       }
-    });
+    }
 
     const chartData = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map((day) => ({
       day,
@@ -1012,189 +1045,8 @@ export class ReportsService {
     workbook.creator = 'SmartExpress System';
     workbook.created = new Date();
 
-    const headerFill: ExcelJS.Fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF1F4E79' },
-    };
-    const headerFont: Partial<ExcelJS.Font> = {
-      size: 15,
-      bold: true,
-      color: { argb: 'FFFFFFFF' },
-    };
-    const colHeaderFill: ExcelJS.Fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFD9E1F2' },
-    };
-    const currencyFmt = '#,##0 "₫"';
-
-    if (type === 'revenue') {
-      const sheet = workbook.addWorksheet('Báo cáo Doanh thu');
-      const colCount = 6;
-
-      sheet.mergeCells(1, 1, 1, colCount);
-      const title = sheet.getCell('A1');
-      title.value = 'SMARTEXPRESS LOGISTICS - BÁO CÁO DOANH THU';
-      title.font = headerFont;
-      title.fill = headerFill;
-      title.alignment = { vertical: 'middle', horizontal: 'center' };
-      sheet.getRow(1).height = 30;
-
-      sheet.mergeCells(2, 1, 2, colCount);
-      const sub = sheet.getCell('A2');
-      sub.value = `Thời gian xuất: ${new Date().toLocaleString('vi-VN')}`;
-      sub.font = { italic: true, size: 10, color: { argb: 'FF595959' } };
-
-      const hr = sheet.getRow(4);
-      hr.values = [
-        'STT',
-        'Ngày',
-        'Tổng cước vận chuyển',
-        'Doanh thu nền tảng (15%)',
-        'Chi trả tài xế (85%)',
-        'Số đơn giao thành công',
-      ];
-      hr.font = { bold: true };
-      hr.fill = colHeaderFill;
-
-      data.revenueReport.chartData.forEach((item, idx) => {
-        const row = sheet.addRow([
-          idx + 1,
-          item.label,
-          item.grossRevenue,
-          item.platformRevenue,
-          item.driverPayout,
-          item.deliveredOrders,
-        ]);
-        row.getCell(3).numFmt = currencyFmt;
-        row.getCell(4).numFmt = currencyFmt;
-        row.getCell(5).numFmt = currencyFmt;
-      });
-
-      sheet.columns = [
-        { width: 6 },
-        { width: 10 },
-        { width: 28 },
-        { width: 28 },
-        { width: 28 },
-        { width: 28 },
-      ];
-    } else if (type === 'top_drivers') {
-      const sheet = workbook.addWorksheet('Top Tài xế Doanh thu');
-      const colCount = 8;
-
-      sheet.mergeCells(1, 1, 1, colCount);
-      const title = sheet.getCell('A1');
-      title.value = 'SMARTEXPRESS LOGISTICS - TOP TÀI XẾ DOANH THU';
-      title.font = headerFont;
-      title.fill = headerFill;
-      title.alignment = { vertical: 'middle', horizontal: 'center' };
-      sheet.getRow(1).height = 30;
-
-      sheet.mergeCells(2, 1, 2, colCount);
-      const sub = sheet.getCell('A2');
-      sub.value = `Thời gian xuất: ${new Date().toLocaleString('vi-VN')}`;
-      sub.font = { italic: true, size: 10, color: { argb: 'FF595959' } };
-
-      const hr = sheet.getRow(4);
-      hr.values = [
-        'Hạng',
-        'Tên Tài Xế',
-        'Biển Số Xe',
-        'Loại Xe',
-        'Số Đơn Đã Giao',
-        'Tổng Doanh Thu Cước',
-        'Chiết Khấu NTT (15%)',
-        'Thu Nhập Thực Nhận (85%)',
-      ];
-      hr.font = { bold: true };
-      hr.fill = colHeaderFill;
-
-      data.topDriversByRevenue.forEach((d, idx) => {
-        const row = sheet.addRow([
-          idx + 1,
-          d.fullName,
-          d.licensePlate,
-          d.vehicleType,
-          d.deliveredOrders,
-          d.totalGrossRevenue,
-          d.platformRevenue,
-          d.driverNetIncome,
-        ]);
-        row.getCell(6).numFmt = currencyFmt;
-        row.getCell(7).numFmt = currencyFmt;
-        row.getCell(8).numFmt = currencyFmt;
-      });
-
-      sheet.columns = [
-        { width: 8 },
-        { width: 25 },
-        { width: 15 },
-        { width: 15 },
-        { width: 18 },
-        { width: 25 },
-        { width: 25 },
-        { width: 28 },
-      ];
-    } else {
-      // top_customers
-      const sheet = workbook.addWorksheet('Top Khách Hàng');
-      const colCount = 8;
-
-      sheet.mergeCells(1, 1, 1, colCount);
-      const title = sheet.getCell('A1');
-      title.value = 'SMARTEXPRESS LOGISTICS - TOP KHÁCH HÀNG';
-      title.font = headerFont;
-      title.fill = headerFill;
-      title.alignment = { vertical: 'middle', horizontal: 'center' };
-      sheet.getRow(1).height = 30;
-
-      sheet.mergeCells(2, 1, 2, colCount);
-      const sub = sheet.getCell('A2');
-      sub.value = `Thời gian xuất: ${new Date().toLocaleString('vi-VN')}`;
-      sub.font = { italic: true, size: 10, color: { argb: 'FF595959' } };
-
-      const hr = sheet.getRow(4);
-      hr.values = [
-        'Hạng',
-        'Tên Khách Hàng',
-        'Số Điện Thoại',
-        'Địa Chỉ',
-        'Tổng Số Đơn',
-        'Đơn Giao Thành Công',
-        'Tổng COD',
-        'Tổng Phí Ship',
-      ];
-      hr.font = { bold: true };
-      hr.fill = colHeaderFill;
-
-      data.topCustomersByOrders.forEach((c, idx) => {
-        const row = sheet.addRow([
-          idx + 1,
-          c.customerName,
-          c.customerPhone,
-          c.deliveryAddress,
-          c.totalOrders,
-          c.deliveredOrders,
-          c.totalCodValue,
-          c.totalShippingFee,
-        ]);
-        row.getCell(7).numFmt = currencyFmt;
-        row.getCell(8).numFmt = currencyFmt;
-      });
-
-      sheet.columns = [
-        { width: 8 },
-        { width: 25 },
-        { width: 18 },
-        { width: 40 },
-        { width: 15 },
-        { width: 22 },
-        { width: 20 },
-        { width: 20 },
-      ];
-    }
+    const exporter = this.exporterFactory.getExporter(type);
+    exporter.export(workbook, data);
 
     return workbook;
   }

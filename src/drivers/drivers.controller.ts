@@ -10,10 +10,21 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { DriversService } from './drivers.service';
 import { Driver } from '../entities/driver.entity';
-import { CreateDriverDto, UpdateDriverDto, UpdateShiftStatusDto, QueryDriverDto } from './dto';
+import {
+  CreateDriverDto,
+  CreateDriverAccountDto,
+  UpdateDriverDto,
+  UpdateShiftStatusDto,
+  QueryDriverDto,
+} from './dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../entities/user.entity';
@@ -27,6 +38,37 @@ export class DriversController {
   @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   findAllUnpaginated(): Promise<Driver[]> {
     return this.driversService.findAllUnpaginated();
+  }
+
+  /**
+   * GET /api/drivers/import/template
+   * Generates and streams a sample .xlsx file for bulk driver import.
+   * Access: ADMIN, DISPATCHER.
+   */
+  @Get('import/template')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  async downloadImportTemplate(@Res() res: Response) {
+    const workbook = await this.driversService.generateImportTemplate();
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', 'attachment; filename="mau_nhap_tai_xe.xlsx"');
+    await workbook.xlsx.write(res);
+    res.end();
+  }
+
+  /**
+   * POST /api/drivers/import
+   * Bulk import drivers (User + Driver atomically per row) from an uploaded .xlsx / .xls file.
+   * Access: ADMIN, DISPATCHER.
+   */
+  @Post('import')
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor('file'))
+  importDrivers(@UploadedFile() file: Express.Multer.File) {
+    return this.driversService.importExcel(file);
   }
 
   /**
@@ -151,12 +193,24 @@ export class DriversController {
   }
 
   /**
+   * POST /api/drivers
+   * Atomically create a User (strictly role = DRIVER) and Driver vehicle profile in one transaction.
+   * Access: ADMIN, DISPATCHER.
+   */
+  @Post()
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
+  @HttpCode(HttpStatus.CREATED)
+  createDriverAccount(@Body() dto: CreateDriverAccountDto) {
+    return this.driversService.createDriverAccount(dto);
+  }
+
+  /**
    * POST /api/drivers/:userId
    * Configure vehicle specifications for a driver.
-   * Access: ADMIN only.
+   * Access: ADMIN, DISPATCHER.
    */
   @Post(':userId')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   @HttpCode(HttpStatus.CREATED)
   create(@Param('userId') userId: string, @Body() dto: CreateDriverDto) {
     return this.driversService.create(userId, dto);
@@ -165,10 +219,10 @@ export class DriversController {
   /**
    * PATCH /api/drivers/:userId
    * Update vehicle specifications (license plate, vehicle type, max weight, max volume).
-   * Access: ADMIN only.
+   * Access: ADMIN, DISPATCHER.
    */
   @Patch(':userId')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.DISPATCHER)
   update(@Param('userId') userId: string, @Body() dto: UpdateDriverDto) {
     return this.driversService.update(userId, dto);
   }

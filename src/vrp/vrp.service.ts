@@ -1,4 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { CostMatrix } from './strategies/distance-matrix.strategy.interface';
+import {
+  HaversineFallbackStrategy,
+  haversineKm as haversine,
+} from './strategies/haversine-fallback.strategy';
+import { OsrmDistanceStrategy } from './strategies/osrm-distance.strategy';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -112,134 +118,8 @@ const ROUTE_COLORS = [
   '#92400E',
 ];
 
-// ─── Haversine distance (km) ──────────────────────────────────────────────────
-
-function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function toRad(deg: number): number {
-  return (deg * Math.PI) / 180;
-}
-
-// ─── OSRM Helpers ─────────────────────────────────────────────────────────────
-
-const OSRM_BASE = 'https://router.project-osrm.org';
-const OSRM_MAX_COORDS = 100;
-const OSRM_TIMEOUT_MS = 4000;
-
-async function fetchWithTimeout(url: string, timeoutMs = OSRM_TIMEOUT_MS): Promise<Response> {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(id);
-    return response;
-  } catch (err) {
-    clearTimeout(id);
-    throw err;
-  }
-}
-
-async function fetchOsrmTable(
-  coords: [number, number][],
-): Promise<{ distances: number[][]; durations: number[][] } | null> {
-  if (coords.length > OSRM_MAX_COORDS) return null;
-  const coordStr = coords.map((c) => `${c[0]},${c[1]}`).join(';');
-  const url = `${OSRM_BASE}/table/v1/driving/${coordStr}?annotations=distance,duration`;
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const res = await fetchWithTimeout(url);
-      if (res.ok) {
-        const data = (await res.json()) as {
-          code?: string;
-          distances?: number[][];
-          durations?: number[][];
-        };
-        if (data.code === 'Ok' && data.distances && data.durations) {
-          return { distances: data.distances, durations: data.durations };
-        }
-      }
-    } catch {
-      if (attempt === 1) await new Promise((r) => setTimeout(r, 400));
-    }
-  }
-  return null;
-}
-
-async function fetchOsrmRoute(
-  coords: [number, number][],
-): Promise<{ distance: number; duration: number; polyline: [number, number][] } | null> {
-  if (coords.length < 2) return null;
-  const coordStr = coords.map((c) => `${c[0]},${c[1]}`).join(';');
-  const url = `${OSRM_BASE}/route/v1/driving/${coordStr}?overview=full&geometries=geojson`;
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const res = await fetchWithTimeout(url);
-      if (res.ok) {
-        const data = (await res.json()) as {
-          code?: string;
-          routes?: {
-            geometry?: { coordinates?: [number, number][] };
-            distance: number;
-            duration: number;
-          }[];
-        };
-        if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
-          const route = data.routes[0];
-          let polyline: [number, number][] = [];
-          if (route.geometry?.coordinates) {
-            polyline = route.geometry.coordinates.map(
-              (c: [number, number]) => [c[1], c[0]] as [number, number],
-            );
-          }
-          return {
-            distance: route.distance / 1000,
-            duration: route.duration / 60,
-            polyline,
-          };
-        }
-      }
-    } catch {
-      if (attempt === 1) await new Promise((r) => setTimeout(r, 400));
-    }
-  }
-  return null;
-}
-
-// ─── Cost Matrix ──────────────────────────────────────────────────────────────
-
-interface CostMatrix {
-  distKm: (i: number, j: number) => number;
-  durMin: (i: number, j: number) => number;
-}
-
-function buildCostMatrix(
-  nodes: Array<{ lat: number; lng: number }>,
-  osrmMatrix: { distances: number[][]; durations: number[][] } | null,
-): CostMatrix {
-  return {
-    distKm: (i, j) => {
-      if (osrmMatrix?.distances?.[i]?.[j] !== undefined) {
-        return osrmMatrix.distances[i][j] / 1000;
-      }
-      return haversine(nodes[i].lat, nodes[i].lng, nodes[j].lat, nodes[j].lng) * 1.35;
-    },
-    durMin: (i, j) => {
-      if (osrmMatrix?.durations?.[i]?.[j] !== undefined) {
-        return osrmMatrix.durations[i][j] / 60;
-      }
-      const dist = haversine(nodes[i].lat, nodes[i].lng, nodes[j].lat, nodes[j].lng) * 1.35;
-      return (dist / 30) * 60;
-    },
-  };
-}
+// Distance matrix & OSRM route geometry computation are delegated to
+// IDistanceMatrixStrategy implementations (OsrmDistanceStrategy + HaversineFallbackStrategy).
 
 // ─── 2-opt Local Search ───────────────────────────────────────────────────────
 
@@ -961,6 +841,16 @@ function optimizeInterRoute(
 @Injectable()
 export class VrpService {
   private readonly logger = new Logger(VrpService.name);
+  private readonly osrmStrategy: OsrmDistanceStrategy;
+  private readonly haversineStrategy: HaversineFallbackStrategy;
+
+  constructor(
+    @Optional() osrmStrategy?: OsrmDistanceStrategy,
+    @Optional() haversineStrategy?: HaversineFallbackStrategy,
+  ) {
+    this.osrmStrategy = osrmStrategy ?? new OsrmDistanceStrategy();
+    this.haversineStrategy = haversineStrategy ?? new HaversineFallbackStrategy();
+  }
 
   /**
    * Prepares and validates input data for the VRP solver (OR-Tools / CVRP Engine).
@@ -1048,26 +938,17 @@ export class VrpService {
     const orderToNodeIdx = new Map<string, number>();
     clusteredOrders.forEach((o, i) => orderToNodeIdx.set(o.id, i + 1));
 
-    // OSRM expects [lng, lat]
-    const osrmCoords: [number, number][] = nodes.map((n) => [n.lng, n.lat]);
-
     this.logger.log(
       `VRP solve: ${clusteredOrders.length} orders, ${availableDrivers.length} drivers, ${nodes.length} nodes total`,
     );
 
-    let osrmMatrix: { distances: number[][]; durations: number[][] } | null = null;
-    if (nodes.length <= OSRM_MAX_COORDS) {
-      osrmMatrix = await fetchOsrmTable(osrmCoords);
-      if (!osrmMatrix) {
-        this.logger.warn('OSRM table unavailable – using Haversine fallback');
-      }
-    } else {
+    let costMatrix = await this.osrmStrategy.buildCostMatrix(nodes);
+    if (!costMatrix) {
       this.logger.warn(
-        `${nodes.length} nodes exceeds OSRM limit (${OSRM_MAX_COORDS}) – using Haversine`,
+        `${this.osrmStrategy.name} unavailable – falling back to ${this.haversineStrategy.name}`,
       );
+      costMatrix = await this.haversineStrategy.buildCostMatrix(nodes);
     }
-
-    const costMatrix = buildCostMatrix(nodes, osrmMatrix);
     const unassignedOrders: VrpUnassignedOrder[] = [];
 
     // Filter individual orders that exceed global maximum driver capacity
@@ -1445,7 +1326,7 @@ export class VrpService {
         ...routeOrders.map((o): [number, number] => [Number(o.longitude), Number(o.latitude)]),
         [Number(depot.longitude), Number(depot.latitude)],
       ];
-      const osrmRoute = await fetchOsrmRoute(routeOsrmCoords);
+      const osrmRoute = await this.osrmStrategy.fetchRouteGeometry(routeOsrmCoords);
 
       let totalDist = 0;
       let totalTime = 0;

@@ -279,7 +279,6 @@ export class TrackingGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     console.log('⚙️ Backend Broadcasting to Web...', broadcastPayload);
     this.server.to('dispatchers').emit('driver_location_updated', broadcastPayload);
-    this.server.emit('driver_location_updated', broadcastPayload);
 
     this.logger.log(
       `[WS] Broadcast driver_location_updated → dispatchers (driver: ${driverId}, lat: ${latitude}, lng: ${longitude})`,

@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { OsrmDistanceStrategy } from './strategies/osrm-distance.strategy';
+import { haversineKm } from './strategies/haversine-fallback.strategy';
 
 export interface GraphNode {
   id: string;
@@ -21,31 +23,15 @@ export interface GraphEdge {
 export class GraphService {
   private nodes: Map<string, GraphNode> = new Map();
   private adjList: Map<string, GraphEdge[]> = new Map();
+  private readonly osrmStrategy: OsrmDistanceStrategy;
 
-  constructor() {
-    // TODO: Load OSM graph data or custom matrix here
-    // e.g. read from a .json or .csv file of Ho Chi Minh city roads
+  constructor(@Optional() osrmStrategy?: OsrmDistanceStrategy) {
+    this.osrmStrategy = osrmStrategy ?? new OsrmDistanceStrategy();
   }
 
   /**
-   * Tính khoảng cách đường chim bay (Haversine)
-   */
-  private haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
-    const R = 6371; // km
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLng = ((lng2 - lng1) * Math.PI) / 180;
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
-
-  /**
-   * Lấy đường đi thực tế trên bản đồ (Snap to roads) qua OSRM API
+   * Lấy đường đi thực tế trên bản đồ (Snap to roads) qua OSRM API (được bảo vệ bởi CircuitBreaker)
    * để giao diện hiển thị giống Google Maps (quẹo cua, rẽ nhánh).
-   *
-   * Trong KLTN, bạn có thể thay thế bằng thuật toán Dijkstra/A* của riêng bạn
-   * nếu bạn đã parse thành công dữ liệu đường giao thông (OSM XML).
    */
   async findShortestPath(
     startLat: number,
@@ -53,43 +39,24 @@ export class GraphService {
     endLat: number,
     endLng: number,
   ): Promise<{ distanceKm: number; durationMin: number; polyline: [number, number][] }> {
-    try {
-      const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), 2500);
-      const res = await fetch(url, { signal: controller.signal });
-      clearTimeout(id);
+    const osrmRoute = await this.osrmStrategy.fetchRouteGeometry(
+      [
+        [startLng, startLat],
+        [endLng, endLat],
+      ],
+      2500,
+    );
 
-      if (res.ok) {
-        const data = (await res.json()) as {
-          code?: string;
-          routes?: {
-            geometry?: { coordinates?: [number, number][] };
-            distance: number;
-            duration: number;
-          }[];
-        };
-        if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
-          const route = data.routes[0];
-          const geometry = route.geometry;
-          let polyline: [number, number][] = [];
-          if (geometry && geometry.coordinates) {
-            // OSRM trả về [lng, lat], ta cần map lại thành [lat, lng] cho React Native Maps
-            polyline = geometry.coordinates.map((c: [number, number]) => [c[1], c[0]]);
-          }
-          return {
-            distanceKm: route.distance / 1000,
-            durationMin: route.duration / 60,
-            polyline,
-          };
-        }
-      }
-    } catch {
-      // Bỏ qua lỗi mạng
+    if (osrmRoute) {
+      return {
+        distanceKm: osrmRoute.distance,
+        durationMin: osrmRoute.duration,
+        polyline: osrmRoute.polyline,
+      };
     }
 
-    // --- FALLBACK HAversine ---
-    const distanceKm = this.haversine(startLat, startLng, endLat, endLng);
+    // --- FALLBACK Haversine ---
+    const distanceKm = haversineKm(startLat, startLng, endLat, endLng);
     const durationMin = (distanceKm / 30) * 60;
     const polyline: [number, number][] = [
       [startLat, startLng],

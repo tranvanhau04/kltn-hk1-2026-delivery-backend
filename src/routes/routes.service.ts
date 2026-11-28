@@ -15,6 +15,7 @@ import { Order, OrderStatus } from '../entities/order.entity';
 import { Driver } from '../entities/driver.entity';
 import { Depot } from '../entities/depot.entity';
 import { User } from '../entities/user.entity';
+import { Shift, ShiftStatus } from '../entities/shift.entity';
 import { OrderStatusHistory } from '../entities/order-status-history.entity';
 import { ProofOfDelivery } from '../entities/proof-of-delivery.entity';
 import { TrackingGateway } from '../tracking/tracking.gateway';
@@ -178,6 +179,12 @@ export class RoutesService {
         const routeId = crypto.randomUUID();
         const routeCode = this.generateRouteCode();
 
+        // Attach the driver's currently active OPEN shift if one exists
+        const activeShift = await queryRunner.manager.findOne(Shift, {
+          where: { driverId: r.driverId, status: ShiftStatus.OPEN },
+          order: { startTime: 'DESC' },
+        });
+
         // 3. INSERT route
         await queryRunner.manager.insert(Route, {
           id: routeId,
@@ -188,7 +195,7 @@ export class RoutesService {
           totalEstimatedTimeMin: r.totalEstimatedTimeMin,
           status: 'PLANNED',
           dispatcherId: dispatcherId ?? null,
-          shiftId: null,
+          shiftId: activeShift?.id ?? null,
           polyline: JSON.stringify(r.polyline),
         });
 
@@ -221,12 +228,12 @@ export class RoutesService {
           });
         }
 
-        // 5. Bulk UPDATE orders status → ASSIGNED
+        // 5. Bulk UPDATE orders status → ASSIGNED and link driverId
         const routeOrderIds = r.stops.map((s) => s.orderId);
         await queryRunner.manager.update(
           Order,
           { id: In(routeOrderIds) },
-          { status: OrderStatus.ASSIGNED, updatedAt: new Date() },
+          { status: OrderStatus.ASSIGNED, driverId: r.driverId, updatedAt: new Date() },
         );
 
         // 6. INSERT audit log per order
@@ -317,40 +324,67 @@ export class RoutesService {
       .take(limit);
 
     const [routes, total] = await qb.getManyAndCount();
+    if (routes.length === 0) {
+      return { data: [], total, page, limit };
+    }
 
-    // Enrich with driver info and stop counts
-    const data = await Promise.all(
-      routes.map(async (route) => {
-        const [driverUser, stopCount] = await Promise.all([
-          this.userRepo.findOne({ where: { id: route.driverId } }),
-          this.stopRepo.count({ where: { routeId: route.id } }),
-        ]);
+    // Batch-enrich driver info and stop counts in 2 queries instead of 2N N+1 queries
+    const driverIds = [...new Set(routes.map((r) => r.driverId).filter(Boolean))];
+    const routeIds = routes.map((r) => r.id);
 
-        let polyline: [number, number][] = [];
-        if (route.polyline) {
-          try {
-            polyline = JSON.parse(route.polyline) as [number, number][];
-          } catch {
-            polyline = [];
-          }
+    const [users, stopCountMap] = await Promise.all([
+      driverIds.length > 0
+        ? this.userRepo.find({
+            where: { id: In(driverIds) },
+            select: ['id', 'fullName', 'phone'],
+          })
+        : Promise.resolve([]),
+      typeof this.stopRepo.createQueryBuilder === 'function'
+        ? this.stopRepo
+            .createQueryBuilder('stop')
+            .select('stop.route_id', 'routeId')
+            .addSelect('COUNT(stop.id)', 'stopCount')
+            .where('stop.route_id IN (:...routeIds)', { routeIds })
+            .groupBy('stop.route_id')
+            .getRawMany<{ routeId: string; stopCount: string | number }>()
+            .then((rows) => new Map(rows.map((r) => [r.routeId, Number(r.stopCount) || 0])))
+        : Promise.all(
+            routes.map(
+              async (r) => [r.id, await this.stopRepo.count({ where: { routeId: r.id } })] as const,
+            ),
+          ).then((entries) => new Map(entries)),
+    ]);
+
+    const userMap = new Map((users || []).map((u) => [u.id, u]));
+
+    const data = routes.map((route) => {
+      const driverUser = userMap.get(route.driverId);
+      const stopCount = stopCountMap.get(route.id) ?? 0;
+
+      let polyline: [number, number][] = [];
+      if (route.polyline) {
+        try {
+          polyline = JSON.parse(route.polyline) as [number, number][];
+        } catch {
+          polyline = [];
         }
+      }
 
-        return {
-          id: route.id,
-          depotId: route.depotId,
-          driverId: route.driverId,
-          driverName: driverUser?.fullName ?? 'Unknown',
-          driverPhone: driverUser?.phone ?? '',
-          routeDate: route.routeDate,
-          totalDistanceKm: Number(route.totalDistanceKm),
-          totalEstimatedTimeMin: Number(route.totalEstimatedTimeMin),
-          status: route.status,
-          stopCount,
-          polyline,
-          createdAt: route.createdAt,
-        };
-      }),
-    );
+      return {
+        id: route.id,
+        depotId: route.depotId,
+        driverId: route.driverId,
+        driverName: driverUser?.fullName ?? 'Unknown',
+        driverPhone: driverUser?.phone ?? '',
+        routeDate: route.routeDate,
+        totalDistanceKm: Number(route.totalDistanceKm),
+        totalEstimatedTimeMin: Number(route.totalEstimatedTimeMin),
+        status: route.status,
+        stopCount,
+        polyline,
+        createdAt: route.createdAt,
+      };
+    });
 
     return { data, total, page, limit };
   }

@@ -9,7 +9,12 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { UsersService } from './users.service';
 import { CreateUserDto, UpdateUserDto, UpdateRoleDto, UpdateStatusDto, QueryUserDto } from './dto';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -31,6 +36,37 @@ export class UsersController {
   @Roles(UserRole.ADMIN)
   findAll(@Query() query: QueryUserDto) {
     return this.usersService.findAll(query);
+  }
+
+  /**
+   * GET /api/users/import/template
+   * Generates and streams a sample .xlsx file for bulk user import.
+   * Access: ADMIN only.
+   */
+  @Get('import/template')
+  @Roles(UserRole.ADMIN)
+  async downloadImportTemplate(@Res() res: Response) {
+    const workbook = this.usersService.generateImportTemplate();
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', 'attachment; filename="mau_nhap_nguoi_dung.xlsx"');
+    await workbook.xlsx.write(res);
+    res.end();
+  }
+
+  /**
+   * POST /api/users/import
+   * Bulk import users from an uploaded .xlsx / .xls file.
+   * Access: ADMIN only.
+   */
+  @Post('import')
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor('file'))
+  importUsers(@UploadedFile() file: Express.Multer.File) {
+    return this.usersService.importExcel(file);
   }
 
   /**

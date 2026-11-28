@@ -331,6 +331,19 @@ export class OrdersService {
       return order;
     }
 
+    // Guard invalid order state transitions
+    if (order.status === OrderStatus.DELIVERED || order.status === OrderStatus.CANCELLED) {
+      throw new BadRequestException(
+        `Không thể thay đổi trạng thái của đơn hàng đã ở trạng thái kết thúc (${order.status}).`,
+      );
+    }
+
+    if (order.status === OrderStatus.NEW && status === OrderStatus.DELIVERED) {
+      throw new BadRequestException(
+        'Không thể chuyển trực tiếp đơn hàng từ NEW sang DELIVERED khi chưa phân công và giao hàng.',
+      );
+    }
+
     order.status = status;
     order.updatedAt = new Date();
 
